@@ -115,27 +115,21 @@ def gs_on_true_preferences(men, women, true_theta_men, true_theta_women):
 #               f"{str(e['pairwise_disjoint']):>8}  {e['matching']}")
 
 def _diagnose_stopping(learner):
-    """Report the worst-overlapping partner pair across all agents.
+    """Report the pair whose CI most overlaps 1/2.
 
-    Returns (worst_margin, agent, b1, b2), where:
-        worst_margin <= 0  -> every pair already disjoint (stopping holds)
-        worst_margin  > 0  -> at least this much CI overlap remains
+    Returns (worst_overlap, agent, b1, b2), where:
+        worst_overlap <= 0  -> every pair's CI excludes 1/2 (stopping holds)
+        worst_overlap  > 0  -> at least this much overlap with 1/2 remains
     """
     worst = None
     for state in learner.agent_states.values():
-        items = state.partners
-        ci = state.ci
-        for i in range(len(items)):
-            lo_i, hi_i = ci[items[i]]
-            for j in range(i + 1, len(items)):
-                lo_j, hi_j = ci[items[j]]
-                # Overlap: positive = CIs intersect, negative = disjoint
-                if hi_i <= lo_j or hi_j <= lo_i:
-                    margin = -min(lo_j - hi_i, lo_i - hi_j)  # disjoint: <= 0
-                else:
-                    margin = min(hi_i - lo_j, hi_j - lo_i)   # overlap:  > 0
-                if worst is None or margin > worst[0]:
-                    worst = (margin, state.agent, items[i], items[j])
+        for (b1, b2), (lo, hi) in state.ci.items():
+            if lo <= 0.5 <= hi:
+                overlap = min(0.5 - lo, hi - 0.5)      # positive
+            else:
+                overlap = -min(lo - 0.5, 0.5 - hi)     # negative
+            if worst is None or overlap > worst[0]:
+                worst = (overlap, state.agent, b1, b2)
     return worst
 
 

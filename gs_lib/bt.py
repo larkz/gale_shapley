@@ -225,7 +225,7 @@ def bt_pairwise_intervals(
     return intervals
 
 
-def bt_ci_width(n_pair: int, t_global: int, constant: float = 6.0) -> float:
+def bt_ci_width(n_pair: int, t_global: int, constant: float = 0.1) -> float:
     """Hoeffding-style half-width from the paper:
 
         w = sqrt( 6 * log(t) / T )
@@ -247,23 +247,24 @@ def bt_confidence_intervals(
     theta_hat: Dict[Hashable, float],
     counts: PairCounts,
     t_global: int,
-) -> Dict[Hashable, Tuple[float, float]]:
-    """Per-item confidence interval on theta_{a, i}.
+) -> Dict[Tuple[Hashable, Hashable], Tuple[float, float]]:
+    """Per-pair CI on the empirical preference p̂ = wins / n_pair.
 
-    We approximate T_{a, i} (the number of comparisons contributing to theta_i)
-    by the total number of comparisons in which item i participated.
+    Keyed by the canonical unordered pair (b_i, b_j). Width uses the
+    direct pair count n_{a,{b_i,b_j}}:
+
+        w = bt_ci_width(n_pair, t_global)   # = sqrt(6 * log(t) / n_pair)
+
+    The interval is [p̂ - w, p̂ + w] ∩ [0, 1].
     """
-    T_i: Dict[Hashable, int] = {i: 0 for i in items}
-    for (b1, b2), t in counts.total.items():
-        T_i[b1] += t
-        T_i[b2] += t
-
-    intervals: Dict[Hashable, Tuple[float, float]] = {}
-    for i in items:
-        w = bt_ci_width(T_i[i], t_global)
-        lo = max(theta_hat.get(i, 0.0) - w, 0.0)
-        hi = theta_hat.get(i, 0.0) + w
-        intervals[i] = (lo, hi)
+    intervals: Dict[Tuple[Hashable, Hashable], Tuple[float, float]] = {}
+    for key, n in counts.total.items():
+        w = bt_ci_width(n, t_global)
+        wins = counts.wins.get(key, 0)
+        p_hat = wins / n if n > 0 else 0.5
+        lo = max(p_hat - w, 0.0)
+        hi = min(p_hat + w, 1.0)
+        intervals[key] = (lo, hi)
     return intervals
 
 

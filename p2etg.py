@@ -194,17 +194,11 @@ class P2ETG:
     # ------------------------------------------------------------------
 
     def _pairwise_disjoint(self) -> bool:
-        """True iff for every agent and every pair of their partners,
-        the CIs on theta are disjoint."""
+        """Stopping condition: every pair's CI on p̂ excludes 1/2."""
         for state in self.agent_states.values():
-            items = state.partners
-            ci = state.ci
-            for i in range(len(items)):
-                lo_i, hi_i = ci[items[i]]
-                for j in range(i + 1, len(items)):
-                    lo_j, hi_j = ci[items[j]]
-                    if not (lo_i > hi_j or lo_j > hi_i):
-                        return False
+            for (lo, hi) in state.ci.values():
+                if not (lo > 0.5 or hi < 0.5):
+                    return False
         return True
 
     # ------------------------------------------------------------------
@@ -312,27 +306,26 @@ class P2ETG:
             min_gap = float("inf")
             worst_overlap = None
             for state in self.agent_states.values():
-                # Widest CI across partners for this agent
                 for (lo, hi) in state.ci.values():
                     w = hi - lo
                     if w > max_width:
                         max_width = w
-                # Smallest |theta_i - theta_j| and worst CI overlap
-                items = state.partners
-                for i in range(len(items)):
-                    lo_i, hi_i = state.ci[items[i]]
-                    for j in range(i + 1, len(items)):
-                        lo_j, hi_j = state.ci[items[j]]
-                        g = abs(state.theta[items[i]] - state.theta[items[j]])
-                        if g < min_gap:
-                            min_gap = g
-                        # Overlap: positive = CIs intersect, negative = disjoint
-                        if hi_i <= lo_j or hi_j <= lo_i:
-                            margin = -min(lo_j - hi_i, lo_i - hi_j)
-                        else:
-                            margin = min(hi_i - lo_j, hi_j - lo_i)
-                        if worst_overlap is None or margin > worst_overlap:
-                            worst_overlap = margin
+
+                    # gap = distance of the interval centre from 1/2
+                    p_hat = (lo + hi) / 2
+                    gap = abs(p_hat - 0.5)
+                    if gap < min_gap:
+                        min_gap = gap
+
+                    # overlap with 1/2:
+                    #   positive if 1/2 is inside [lo, hi]
+                    #   negative if the interval is entirely on one side of 1/2
+                    if lo <= 0.5 <= hi:
+                        overlap = min(0.5 - lo, hi - 0.5)
+                    else:
+                        overlap = -min(lo - 0.5, 0.5 - hi)
+                    if worst_overlap is None or overlap > worst_overlap:
+                        worst_overlap = overlap
 
             if min_gap == float("inf"):
                 min_gap = float("nan")
