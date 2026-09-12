@@ -437,9 +437,52 @@ class P2ETG:
 
         self.stopped = False
         self.committed_matching = trace[-1]["matching"] if trace else None
+
+        # After the print, before return:
+        hook = getattr(self, "_emit_line_hook", None)
+        if hook is not None:
+            hook(t, matching, disjoint)
+
         return {
             "epochs": trace,
             "T_stop": self.t,
             "matching": self.committed_matching,
             "stopped": False,
         }
+
+    def run_with_trace(
+        self,
+        max_epochs: int = 40,
+        adaptive: bool = False,
+        check_every: int = 500,
+        max_samples: int = 2_000_000,
+        verbose: bool = False,
+    ) -> Dict[str, object]:
+        """Same as run_until_stop, but records the matching at every
+        epoch/check so that per-round regret can be reconstructed.
+
+        Returns a dict with an additional key 'rounds':
+            rounds = [ (t, matching, disjoint), ... ]
+        """
+        rounds: List[Tuple[int, Matching, bool]] = []
+
+        # We monkey-patch _emit_line so it also records the round.
+        original_emit = getattr(self, "_emit_line_hook", None)
+
+        def hook(t, matching, disjoint):
+            rounds.append((t, matching, disjoint))
+
+        self._emit_line_hook = hook
+        try:
+            result = self.run_until_stop(
+                max_epochs=max_epochs,
+                adaptive=adaptive,
+                check_every=check_every,
+                max_samples=max_samples,
+                verbose=verbose,
+            )
+        finally:
+            self._emit_line_hook = original_emit
+
+        result["rounds"] = rounds
+        return result
