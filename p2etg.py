@@ -1,18 +1,6 @@
 """
 p2etg.py
 Pairwise Two-Sided Explore-then-Gale-Shapley (P2ETG) learner.
-
-Integrates with the stable matching library from earlier:
-    Man, Woman, Matching, PreferenceList, GaleShapley
-
-The learner runs in doubling epochs:
-    R_l = 2^l
-For each agent and each unordered pair of that agent's potential partners,
-we accumulate R_l comparisons before refreshing the estimates.
-
-Stopping condition:
-    For every agent and every pair of their partners, the confidence intervals
-    on theta are disjoint. (Pairwise disjointness, not per-parameter width.)
 """
 
 from __future__ import annotations
@@ -42,7 +30,7 @@ class AgentState:
     partners: List[Hashable]
     counts: PairCounts = field(default_factory=PairCounts)
     theta: Dict[Hashable, float] = field(default_factory=dict)
-    ci: Dict[Hashable, Tuple[float, float]] = field(default_factory=dict)
+    ci: Dict[Tuple[Hashable, Hashable], Tuple[float, float]] = field(default_factory=dict)
 
     def __post_init__(self):
         if not self.theta:
@@ -55,17 +43,7 @@ class AgentState:
 # ============================================================================
 
 class P2ETG:
-    """Pairwise Two-Sided Explore-then-Gale-Shapley learner.
-
-    Args:
-        men:   list of Man objects.
-        women: list of Woman objects.
-        true_theta_men:   dict Man -> {Woman: float}, optional ground truth.
-        true_theta_women: dict Woman -> {Man: float}, optional ground truth.
-            If provided, comparisons are sampled from the true BT model.
-            Otherwise, comparisons must be injected via `observe`.
-        rng: random.Random instance for reproducibility.
-    """
+    """Pairwise Two-Sided Explore-then-Gale-Shapley learner."""
 
     def __init__(
         self,
@@ -83,7 +61,6 @@ class P2ETG:
         self.rng = rng or random.Random(0)
         self.constant = constant
 
-        # One AgentState per participant
         self.agent_states: Dict[Hashable, AgentState] = {}
         for m in self.men:
             self.agent_states[m] = AgentState(agent=m, partners=self.women)
@@ -95,8 +72,7 @@ class P2ETG:
         self.stopped = False
         self.committed_matching: Optional[Matching] = None
 
-        # PATCH: precompute the arms list once (does not change across epochs).
-        # Each arm is (agent, canonical_key, b1, b2).
+        # Precompute the arms list once.
         self._arms: List[Tuple[Hashable, Tuple, Hashable, Hashable]] = []
         for state in self.agent_states.values():
             agent = state.agent
@@ -106,8 +82,7 @@ class P2ETG:
                     key = _canonical(partners[i], partners[j])
                     self._arms.append((agent, key, partners[i], partners[j]))
 
-        # PATCH: precompute true BT probabilities for every (agent, pair).
-        # Eliminates per-sample dict lookups and canonicalisation.
+        # Precompute true BT probabilities for every (agent, pair).
         self._true_prob_cache: Dict[Tuple, float] = {}
         if (self.true_theta_men is not None
                 and self.true_theta_women is not None):
@@ -133,39 +108,27 @@ class P2ETG:
             t1, t2 = theta[b2], theta[b1]
         return t1 / (t1 + t2)
 
-    # def _sample_comparison(self, agent: Hashable, b1: Hashable,
-    #                        b2: Hashable) -> int:
-    #     """Sample a Bernoulli comparison outcome.
+    def _sample_comparison(self, agent: Hashable, b1: Hashable,
+                           b2: Hashable) -> int:
+        """Sample one Bernoulli comparison.
 
-    #     Returns 1 if the canonical-first of (b1,b2) wins, else 0.
-    #     Uses the precomputed probability cache.
-    #     """
-    #     if not self._true_prob_cache:
-    #         raise RuntimeError(
-    #             "No ground-truth thetas provided; use observe() to inject "
-    #             "external comparisons instead of running the sampler."
-    #         )
-    #     key = _canonical(b1, b2)
-    #     p = self._true_prob_cache[(agent, key)]
-    #     draw = self.rng.random() < p
-    #     return 1 if draw else 0
-
-    def _sample_comparison(self, agent, b1, b2):
+        Returns 1 if the canonical-first of (b1, b2) won, else 0.
+        """
+        if not self._true_prob_cache:
+            raise RuntimeError(
+                "No ground-truth thetas provided; use observe() to inject "
+                "external comparisons instead of running the sampler."
+            )
         key = _canonical(b1, b2)
         p = self._true_prob_cache[(agent, key)]
-        draw = self.rng.random() < p
-        return 1 if draw else 0
+        return 1 if self.rng.random() < p else 0
 
     def observe(self, agent: Hashable, b1: Hashable, b2: Hashable,
-            x: int) -> None:
+                x: int) -> None:
         """Inject an externally-supplied comparison outcome.
 
-        Semantics of x:
-            x = 1  ->  the canonical-first of (b1, b2) won the comparison
-            x = 0  ->  the canonical-second won the comparison
-
-        This matches what _sample_comparison returns, so the internal
-        sampler and this external API use the same convention.
+        x = 1 means the canonical-first of (b1, b2) won.
+        x = 0 means the canonical-second won.
         """
         self.agent_states[agent].counts.record(b1, b2, x)
 
@@ -174,7 +137,6 @@ class P2ETG:
     # ------------------------------------------------------------------
 
     def _refresh_estimates(self) -> None:
-        # PATCH: warm-started, looser MLE.
         for state in self.agent_states.values():
             state.theta = bt_mle_mm(
                 state.partners,
@@ -185,7 +147,11 @@ class P2ETG:
                 theta_init=state.theta,
             )
             state.ci = bt_confidence_intervals(
-                state.partners, state.theta, state.counts, self.t, self.constant
+                state.partners,
+                state.theta,
+                state.counts,
+                self.t,
+                self.constant,
             )
 
     # ------------------------------------------------------------------
@@ -201,7 +167,6 @@ class P2ETG:
         return PreferenceList(prefs)
 
     def current_matching(self) -> Matching:
-        """Run Gale-Shapley on the current empirical profile (A-side proposes)."""
         prefs = self._build_preference_lists()
         return GaleShapley(prefs).find_stable_matching(proposing_side="men")
 
@@ -209,40 +174,27 @@ class P2ETG:
     # Stopping condition
     # ------------------------------------------------------------------
 
-    # def _pairwise_disjoint(self) -> bool:
-    #     """Stopping condition: every pair's CI on p̂ excludes 1/2."""
-    #     for state in self.agent_states.values():
-    #         for (lo, hi) in state.ci.values():
-    #             if not (lo > 0.5 or hi < 0.5):
-    #                 return False
-    #     return True
-
     def _pairwise_disjoint(self) -> bool:
+        """Every pair's CI on p_hat must exclude 1/2."""
         for state in self.agent_states.values():
             n = len(state.partners)
             expected = n * (n - 1) // 2
             if len(state.ci) < expected:
-                return False              # some pairs never compared
+                return False
             for (lo, hi) in state.ci.values():
                 if not (lo > 0.5 or hi < 0.5):
                     return False
         return True
-    
+
     # ------------------------------------------------------------------
-    # Epoch loop
+    # Exploration loops
     # ------------------------------------------------------------------
 
     def _run_epoch(self) -> int:
-        """Run one epoch of round-robin exploration.
-
-        In epoch l, target R = 2^l comparisons per (agent, unordered pair).
-        PATCH: uses an active-arm list; each sample is O(1) amortised.
-        """
+        """One doubling epoch: sample all arms up to R = 2^epoch."""
         R = 2 ** self.epoch
         new_samples = 0
 
-        # Build the active list for this epoch. Each entry is
-        # (agent, key, b1, b2); arms already at R are excluded.
         active: List[Tuple[Hashable, Tuple, Hashable, Hashable]] = []
         for arm in self._arms:
             agent, key, b1, b2 = arm
@@ -250,9 +202,6 @@ class P2ETG:
             if state.counts.total.get(key, 0) < R:
                 active.append(arm)
 
-        # Random-draw + swap-remove loop (uniform without replacement bias
-        # only if we re-insert; since we never re-insert within an epoch,
-        # this is uniform over the remaining active arms per draw).
         while active:
             idx = self.rng.randrange(len(active))
             agent, key, b1, b2 = active[idx]
@@ -264,28 +213,19 @@ class P2ETG:
             new_samples += 1
 
             if state.counts.total.get(key, 0) >= R:
-                # Swap-remove: O(1) removal
                 active[idx] = active[-1]
                 active.pop()
 
         return new_samples
 
-    # ------------------------------------------------------------------
-    # Adaptive sampling (PATCH): stop as soon as CIs separate
-    # ------------------------------------------------------------------
-
     def _sample_batch(self, n: int) -> int:
-        """Sample `n` comparisons round-robin across arms, weighted by
-        how far each arm is from the current maximum count. Always picks
-        the least-sampled arms first, in a random order."""
+        """Draw n samples, always from the least-sampled arm."""
         new_samples = 0
         for _ in range(n):
-            # Find the minimum count across arms
             min_count = min(
                 self.agent_states[a].counts.total.get(k, 0)
                 for (a, k, _, _) in self._arms
             )
-            # Collect arms tied at min_count
             candidates = [
                 (a, k, b1, b2) for (a, k, b1, b2) in self._arms
                 if self.agent_states[a].counts.total.get(k, 0) == min_count
@@ -308,27 +248,19 @@ class P2ETG:
         check_every: int = 500,
         max_samples: int = 2_000_000_000_000,
         verbose: bool = True,
+        rounds: Optional[List[Tuple[int, Matching, bool]]] = None,
     ) -> Dict[str, object]:
         """Run P2ETG until the stopping condition holds.
 
-        Args:
-            max_epochs:   cap on doubling epochs (used in non-adaptive mode).
-            adaptive:     if True, sample in small batches and check the
-                          stopping condition every `check_every` samples.
-                          Otherwise, run full doubling epochs.
-            check_every:  batch size for adaptive mode.
-            max_samples:  hard cap on total samples (both modes).
-            verbose:      if True, print a one-line live trace per epoch.
-
-        Returns a trace dict.
+        If `rounds` is a list, every check appends (t, matching, disjoint)
+        to it. Otherwise, nothing is recorded.
         """
         trace: List[Dict[str, object]] = []
 
         # ------------------------------------------------------------------
-        # Live-print helper
+        # Live-print helper (printing only; no bookkeeping side-effects)
         # ------------------------------------------------------------------
         def _emit_line(epoch, R, new_samples, t, disjoint, matching):
-            """Compute per-epoch diagnostics and print one line."""
             max_width = 0.0
             min_gap = float("inf")
             worst_overlap = None
@@ -337,16 +269,10 @@ class P2ETG:
                     w = hi - lo
                     if w > max_width:
                         max_width = w
-
-                    # gap = distance of the interval centre from 1/2
                     p_hat = (lo + hi) / 2
                     gap = abs(p_hat - 0.5)
                     if gap < min_gap:
                         min_gap = gap
-
-                    # overlap with 1/2:
-                    #   positive if 1/2 is inside [lo, hi]
-                    #   negative if the interval is entirely on one side of 1/2
                     if lo <= 0.5 <= hi:
                         overlap = min(0.5 - lo, hi - 0.5)
                     else:
@@ -359,7 +285,6 @@ class P2ETG:
             if worst_overlap is None:
                 worst_overlap = float("nan")
 
-            # Header (printed once)
             if not getattr(self, "_trace_header_printed", False):
                 hdr = (f"{'ep':>4} {'R':>8} {'new':>8} {'t':>10} "
                        f"{'disj':>6} {'maxWid':>8} {'minGap':>8} "
@@ -379,7 +304,7 @@ class P2ETG:
             }
 
         # ------------------------------------------------------------------
-        # Adaptive mode: stop as soon as CIs separate
+        # Adaptive mode
         # ------------------------------------------------------------------
         if adaptive:
             while self.t < max_samples:
@@ -387,6 +312,9 @@ class P2ETG:
                 self._refresh_estimates()
                 matching = self.current_matching()
                 disjoint = self._pairwise_disjoint()
+
+                if rounds is not None:
+                    rounds.append((self.t, matching, disjoint))
 
                 diag = _emit_line(
                     self.epoch, check_every, check_every,
@@ -435,6 +363,9 @@ class P2ETG:
             matching = self.current_matching()
             disjoint = self._pairwise_disjoint()
 
+            if rounds is not None:
+                rounds.append((self.t, matching, disjoint))
+
             diag = _emit_line(
                 self.epoch, 2 ** self.epoch, new_samples,
                 self.t, disjoint, matching,
@@ -464,12 +395,6 @@ class P2ETG:
 
         self.stopped = False
         self.committed_matching = trace[-1]["matching"] if trace else None
-
-        # After the print, before return:
-        hook = getattr(self, "_emit_line_hook", None)
-        if hook is not None:
-            hook(t, matching, disjoint)
-
         return {
             "epochs": trace,
             "T_stop": self.t,
@@ -477,39 +402,31 @@ class P2ETG:
             "stopped": False,
         }
 
+    # ------------------------------------------------------------------
+    # Thin wrapper that records rounds
+    # ------------------------------------------------------------------
+
     def run_with_trace(
         self,
-        max_epochs: int = 40,
+        max_epochs: int = 400,
         adaptive: bool = False,
         check_every: int = 500,
-        max_samples: int = 2_000_000,
+        max_samples: int = 2_000_000_000_000,
         verbose: bool = False,
     ) -> Dict[str, object]:
-        """Same as run_until_stop, but records the matching at every
-        epoch/check so that per-round regret can be reconstructed.
+        """Same as run_until_stop, but also returns a per-check trace.
 
         Returns a dict with an additional key 'rounds':
-            rounds = [ (t, matching, disjoint), ... ]
+            rounds = [(t, matching, disjoint), ...]
         """
         rounds: List[Tuple[int, Matching, bool]] = []
-
-        # We monkey-patch _emit_line so it also records the round.
-        original_emit = getattr(self, "_emit_line_hook", None)
-
-        def hook(t, matching, disjoint):
-            rounds.append((t, matching, disjoint))
-
-        self._emit_line_hook = hook
-        try:
-            result = self.run_until_stop(
-                max_epochs=max_epochs,
-                adaptive=adaptive,
-                check_every=check_every,
-                max_samples=max_samples,
-                verbose=verbose,
-            )
-        finally:
-            self._emit_line_hook = original_emit
-
+        result = self.run_until_stop(
+            max_epochs=max_epochs,
+            adaptive=adaptive,
+            check_every=check_every,
+            max_samples=max_samples,
+            verbose=verbose,
+            rounds=rounds,
+        )
         result["rounds"] = rounds
         return result

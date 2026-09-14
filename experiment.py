@@ -1,30 +1,12 @@
 """
 experiment.py
 Data generation and plotting harness for P2ETG.
-
-Runs P2ETG across seeds and configurations, records per-round regret,
-saves results as CSV + JSON, and produces seaborn visualizations.
-
-Directory layout:
-    runs/
-        N{N}_K{K}_alpha{alpha}_seed{seed}/
-            config.json
-            rounds.csv        # t, matching_str, disjoint
-            summary.json      # T_stop, stopped, regret_at_T, etc.
-
-    plots/
-        regret_curve.png
-        tstop_distribution.png
-        ci_convergence.png
-        regret_by_N.png
 """
 
 from __future__ import annotations
 
 import json
-import os
 import random
-from dataclasses import asdict
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -34,27 +16,25 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 from gs_lib.gs_tools import (
-    Man, Woman, PreferenceList, GaleShapley, StabilityVerifier, Matching,
+    Man, Woman, PreferenceList, GaleShapley, StabilityVerifier,
 )
 from p2etg import P2ETG
 
-
-# ============================================================================
-# Directory setup
-# ============================================================================
 
 RUNS_DIR  = Path("runs")
 PLOTS_DIR = Path("plots")
 RUNS_DIR.mkdir(exist_ok=True)
 PLOTS_DIR.mkdir(exist_ok=True)
 
+# Number of post-stop rounds recorded in rounds.csv.
+POST_STOP_TAIL = 200
+
 
 # ============================================================================
-# Helpers (kept local so this file is self-contained)
+# Helpers
 # ============================================================================
 
 def random_theta(participants, partners, rng, alpha: float = 0.5):
-    """Dirichlet-distributed theta vectors, one per participant."""
     K = len(partners)
     return {
         p: {q: float(w) for q, w in zip(partners, rng.dirichlet([alpha] * K))}
@@ -65,7 +45,7 @@ def random_theta(participants, partners, rng, alpha: float = 0.5):
 def gs_on_true_preferences(men, women, true_theta_men, true_theta_women):
     prefs = {
         **{m: sorted(women, key=lambda w: -true_theta_men[m][w]) for m in men},
-        **{w: sorted(men,   key=lambda m: -true_theta_women[w][m]) for w in women},
+        **{w: sorted(men, key=lambda m: -true_theta_women[w][m]) for w in women},
     }
     return GaleShapley(PreferenceList(prefs)).find_stable_matching("men")
 
@@ -102,15 +82,17 @@ def run_single(
         verbose=False,
     )
 
-    # Reconstruct per-round matching: P2ETG plays H_t = GS(hat_theta_t)
-    # throughout exploration, and H_{T_stop} thereafter.
-    # Because the trace only records the matching at each check, we
-    # interpolate: each recorded matching is played until the next record.
     rounds = result.get("rounds", [])
-    rows: List[Dict] = []
     committed = result["matching"]
 
-    # Build a timeline: each (t, matching) applies from previous t+1 to t
+    # ------------------------------------------------------------------
+    # Build the dense per-round timeline.
+    #
+    # `rounds` contains one entry per check: (t, matching, disjoint).
+    # The matching recorded at time t applies to rounds (prev_t, t],
+    # because P2ETG only recomputes the matching at check time.
+    # ------------------------------------------------------------------
+    rows: List[Dict] = []
     prev_t = 0
     for (t, matching, disjoint) in rounds:
         for tt in range(prev_t + 1, t + 1):
@@ -122,24 +104,26 @@ def run_single(
             })
         prev_t = t
 
-    # After T_stop, play committed matching forever (within the horizon)
-    horizon = max_samples if adaptive else (2 ** max_epochs)
-    for tt in range(prev_t + 1, horizon + 1):
-        rows.append({
-            "t": tt,
-            "matching_str": str(committed),
-            "disjoint": result["stopped"],
-            "correct": int(committed == h_star),
-        })
+    # If the algorithm stopped, fill a small tail with the committed matching.
+    # If it didn't stop, `prev_t` should already equal `max_samples`; in that
+    # case there is nothing to fill.
+    if result["stopped"]:
+        for tt in range(prev_t + 1, prev_t + POST_STOP_TAIL + 1):
+            rows.append({
+                "t": tt,
+                "matching_str": str(committed),
+                "disjoint": True,
+                "correct": int(committed == h_star),
+            })
 
-    # Cumulative 0/1 regret: sum over t of (1 - correct_t)
+    # Cumulative 0/1 regret.
     cumulative = 0
     for r in rows:
         cumulative += (1 - r["correct"])
         r["regret"] = cumulative
 
     # ------------------------------------------------------------------
-    # Stability checks (under truth and under the learner's estimate)
+    # Stability checks under true and estimated preferences.
     # ------------------------------------------------------------------
     prefs_true = PreferenceList({
         **{m: sorted(women, key=lambda w: -true_theta_men[m][w]) for m in men},
@@ -159,7 +143,6 @@ def run_single(
         "oracle_str": str(h_star),
         "committed_str": str(committed),
         "final_regret": rows[-1]["regret"] if rows else None,
-        # NEW:
         "stable_under_truth": int(ok_true),
         "stable_under_hat":   int(ok_hat),
         "reason_truth":       reason_true,
@@ -168,24 +151,22 @@ def run_single(
     }
     return rows, summary
 
+
 # ============================================================================
-# Data generation driver
+# Data generation
 # ============================================================================
 
 def generate_data(
-    Ns: List[int] = [3],
-    Ks: List[int] = [3],
+    Ns: List[int] = [3, 5],
+    Ks: List[int] = [3, 5],
     alphas: List[float] = [0.5],
-    seeds: List[int] = list(range(10)),
+    seeds: List[int] = list(range(2)),
     max_epochs: int = 20,
     adaptive: bool = True,
-    check_every: int = 50,
-    max_samples: int = 100_000,
-    constant: float = 0.05,
+    check_every: int = 25,
+    max_samples: int = 200_000,
+    constant: float = 0.1,
 ) -> pd.DataFrame:
-    """Run all configurations, save per-run CSVs and summaries, and return
-    a long-format DataFrame for plotting."""
-
     all_rows: List[Dict] = []
     all_summaries: List[Dict] = []
 
@@ -206,8 +187,7 @@ def generate_data(
                         constant=constant,
                     )
 
-                    df = pd.DataFrame(rows)
-                    df.to_csv(run_dir / "rounds.csv", index=False)
+                    pd.DataFrame(rows).to_csv(run_dir / "rounds.csv", index=False)
                     (run_dir / "summary.json").write_text(
                         json.dumps(summary, indent=2)
                     )
@@ -217,6 +197,7 @@ def generate_data(
                             "adaptive": adaptive,
                             "check_every": check_every,
                             "max_samples": max_samples,
+                            "constant": constant,
                         }, indent=2)
                     )
 
@@ -243,10 +224,8 @@ def generate_data(
 # ============================================================================
 
 def plot_regret_with_uncertainty(df_all: pd.DataFrame):
-    """Regret curves with 95% band across seeds, one curve per (N,K)."""
     sns.set_theme(style="whitegrid", context="talk")
 
-    # Aggregate regret at each (N, K, t): mean and 95% CI across seeds
     grouped = (df_all
                .groupby(["N", "K", "t"])
                .agg(regret_mean=("regret", "mean"),
@@ -280,13 +259,14 @@ def plot_regret_with_uncertainty(df_all: pd.DataFrame):
 
 
 def plot_tstop_distribution(df_sum: pd.DataFrame):
-    """Box + strip plot of T_stop across (N, K)."""
     sns.set_theme(style="whitegrid", context="talk")
     fig, ax = plt.subplots(figsize=(9, 6))
 
-    # Only show configurations where the algorithm actually stopped
     df_plot = df_sum[df_sum["stopped"]].copy()
-    # df_plot["config"] = df_plot.apply(lambda r: f"N{int(r.N)}K{int(r.K)}", axis=1)
+    if len(df_plot) == 0:
+        plt.close(fig)
+        return
+
     df_plot["config"] = (
         "N" + df_plot["N"].astype(int).astype(str)
         + "K" + df_plot["K"].astype(int).astype(str)
@@ -307,9 +287,6 @@ def plot_tstop_distribution(df_sum: pd.DataFrame):
 
 
 def plot_ci_convergence(df_all: pd.DataFrame):
-    """Mean CI width vs t, one line per (N,K)."""
-    # We don't currently log max_wid per round in rounds.csv — add it if you
-    # extend run_with_trace to record it. Fallback: use regret as proxy.
     sns.set_theme(style="whitegrid", context="talk")
     fig, ax = plt.subplots(figsize=(9, 6))
 
@@ -324,7 +301,7 @@ def plot_ci_convergence(df_all: pd.DataFrame):
                 label=f"N={N}, K={K}", lw=2)
 
     ax.set_xlabel("Round $t$")
-    ax.set_ylabel("P(H_t = H_*)")
+    ax.set_ylabel("P($H_t = H_*$)")
     ax.set_ylim(-0.02, 1.02)
     ax.set_title("Probability of correct matching over time")
     ax.legend(title="Configuration", frameon=True, fontsize=10, ncol=2)
@@ -335,7 +312,6 @@ def plot_ci_convergence(df_all: pd.DataFrame):
 
 
 def plot_regret_by_N(df_sum: pd.DataFrame):
-    """Final regret as a function of N, with hue by K."""
     sns.set_theme(style="whitegrid", context="talk")
     fig, ax = plt.subplots(figsize=(9, 6))
 
@@ -347,11 +323,12 @@ def plot_regret_by_N(df_sum: pd.DataFrame):
     ax.set_xlabel("$N$ (A-side size)")
     ax.set_ylabel("Final regret")
     ax.set_title("Final regret vs problem size")
-    # Deduplicate legend entries
+
     handles, labels = ax.get_legend_handles_labels()
-    ax.legend(handles[:df_sum["K"].nunique()],
-              labels[:df_sum["K"].nunique()],
+    k_vals = sorted(df_sum["K"].unique())
+    ax.legend(handles[:len(k_vals)], labels[:len(k_vals)],
               title="K", frameon=True, fontsize=10)
+
     sns.despine()
     fig.tight_layout()
     fig.savefig(PLOTS_DIR / "regret_by_N.png", dpi=160)
@@ -367,13 +344,13 @@ def main():
     df_all = generate_data(
         Ns=[3],
         Ks=[3],
-        alphas=[1.0],
-        seeds=list(range(10)),
-        max_epochs=3,
+        alphas=[2.0],
+        seeds=list(range(2)),
+        max_epochs=20,
         adaptive=True,
         check_every=25,
-        max_samples=100_000,
-        constant = 0.25
+        max_samples=200_000,
+        constant=0.1,
     )
 
     print("\nLoading summaries...")

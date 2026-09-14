@@ -15,7 +15,6 @@ from dataclasses import dataclass, field
 from typing import Dict, Hashable, List, Tuple
 
 import math
-import numpy as np
 
 
 # ============================================================================
@@ -56,7 +55,7 @@ class PairCounts:
 
 
 # ============================================================================
-# MM algorithm (unchanged)
+# Bradley-Terry MM algorithm
 # ============================================================================
 
 def bt_mle_mm(
@@ -67,6 +66,10 @@ def bt_mle_mm(
     tol: float = 1e-9,
     theta_init: Dict[Hashable, float] | None = None,
 ) -> Dict[Hashable, float]:
+    """Compute the Bradley-Terry MLE via the MM algorithm of Hunter (2004).
+
+    Returns a dict item -> estimated theta, all positive, normalised to sum 1.
+    """
     K = len(items)
     if K == 0:
         return {}
@@ -78,14 +81,11 @@ def bt_mle_mm(
     else:
         theta = {i: 1.0 / K for i in items}
 
-    n_i: Dict[Hashable, int] = {i: 0 for i in items}
     w_i: Dict[Hashable, int] = {i: 0 for i in items}
 
     for (b1, b2), t in totals.items():
         w12 = wins.get((b1, b2), 0)
         w21 = t - w12
-        n_i[b1] += t
-        n_i[b2] += t
         w_i[b1] += w12
         w_i[b2] += w21
 
@@ -119,10 +119,13 @@ def bt_mle_mm(
 
 
 # ============================================================================
-# Confidence intervals (unchanged)
+# Confidence intervals
 # ============================================================================
 
 def bt_ci_width(n_pair: int, t_global: int, constant: float = 0.1) -> float:
+    """Half-width of the pairwise CI:
+        w = sqrt( constant * log(t_global) / n_pair )
+    """
     if n_pair <= 0:
         return float("inf")
     t = max(t_global, 2)
@@ -136,6 +139,10 @@ def bt_confidence_intervals(
     t_global: int,
     constant: float = 0.1,
 ) -> Dict[Tuple[Hashable, Hashable], Tuple[float, float]]:
+    """Per-pair CI on the empirical preference p_hat = wins / n_pair.
+
+    Returns a dict keyed by the canonical unordered pair.
+    """
     intervals: Dict[Tuple[Hashable, Hashable], Tuple[float, float]] = {}
     for key, n in counts.total.items():
         w = bt_ci_width(n, t_global, constant)
@@ -148,11 +155,12 @@ def bt_confidence_intervals(
 
 
 # ============================================================================
-# Ranking (unchanged)
+# Ranking
 # ============================================================================
 
 def bt_ranking(theta_hat: Dict[Hashable, float],
                tie_break: str = "id") -> List[Hashable]:
+    """Sort items by descending theta. Ties broken alphabetically by id."""
     items = list(theta_hat.keys())
     if tie_break == "id":
         items.sort(key=lambda i: (-theta_hat[i], str(i)))
