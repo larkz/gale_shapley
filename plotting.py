@@ -200,9 +200,10 @@ def plot_mean_regret_with_std(all_data, max_iterations=200000,
                               save_path=None, figsize=(12, 7),
                               show_individual=True,
                               std_multiplier=1.0,
-                              use_sem=False):
+                              use_sem=False,
+                              labels=None):
     """
-    Plot mean cumulative regret across seeds with ±k*std shaded area.
+    Plot mean cumulative regret across seeds with ±k*spread shaded area.
 
     Parameters
     ----------
@@ -218,14 +219,16 @@ def plot_mean_regret_with_std(all_data, max_iterations=200000,
         Whether to overlay individual seed curves (faintly).
     std_multiplier : float
         Multiplier k for the shaded band: mean ± k * spread.
-        Set to 1.0 for ±1σ (default), 2.0 for ±2σ, 0.5 for ±0.5σ, etc.
-        Set to 0 to disable the band.
     use_sem : bool
-        If True, use standard error of the mean (std / sqrt(n)) instead of
-        std. This makes the band shrink as n grows, which is often more
-        appropriate for showing uncertainty in the mean. Combined with
-        std_multiplier, gives ± k * SEM.
+        If True, use standard error of the mean (std / sqrt(n)) instead of std.
+    labels : dict, optional
+        Map from config_name (folder prefix) -> display label in the legend.
+        Missing entries fall back to the raw config_name.
+        Example: {"N3_K3_a0.5": "N=3, K=3, α=0.5"}
     """
+    labels = labels or {}
+    label_of = lambda cfg: labels.get(cfg, cfg)
+
     fig, ax = plt.subplots(figsize=figsize)
 
     config_names = sorted(all_data.keys())
@@ -250,17 +253,13 @@ def plot_mean_regret_with_std(all_data, max_iterations=200000,
         mean_regret = regret_matrix.mean(axis=0)
         std_regret = regret_matrix.std(axis=0, ddof=1) if n > 1 else np.zeros_like(mean_regret)
 
-        # choose spread measure
         if use_sem and n > 1:
             spread = std_regret / np.sqrt(n)
-            band_label = f"±{std_multiplier:g}·SEM"
         else:
             spread = std_regret
-            band_label = f"±{std_multiplier:g}·std"
 
         x = np.arange(1, max_iterations + 1)
 
-        # Shaded band: mean ± std_multiplier * spread
         if std_multiplier > 0 and n > 1:
             ax.fill_between(
                 x,
@@ -271,11 +270,9 @@ def plot_mean_regret_with_std(all_data, max_iterations=200000,
                 linewidth=0,
             )
 
-        # Mean line
         ax.plot(x, mean_regret, color=color, linewidth=2,
-                label=f"{config_name} (n={n})")
+                label=f"{label_of(config_name)} (n={n})")
 
-        # Optional individual seeds
         if show_individual:
             for regret in regret_arrays:
                 ax.plot(x, regret, color=color, alpha=0.15, linewidth=0.5)
@@ -294,6 +291,9 @@ def plot_mean_regret_with_std(all_data, max_iterations=200000,
         print(f"Saved: {save_path}")
     plt.show()
     return fig, ax
+
+
+
 
 def plot_summary_stats(all_data, save_path=None, figsize=(12, 5)):
     """
