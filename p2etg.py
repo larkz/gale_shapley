@@ -131,18 +131,24 @@ class P2ETG:
             t1, t2 = theta[b2], theta[b1]
         return t1 / (t1 + t2)
 
-    def _sample_comparison(self, agent: Hashable, b1: Hashable,
-                           b2: Hashable) -> int:
-        """Sample a Bernoulli comparison outcome.
+    # def _sample_comparison(self, agent: Hashable, b1: Hashable,
+    #                        b2: Hashable) -> int:
+    #     """Sample a Bernoulli comparison outcome.
 
-        Returns 1 if the canonical-first of (b1,b2) wins, else 0.
-        Uses the precomputed probability cache.
-        """
-        if not self._true_prob_cache:
-            raise RuntimeError(
-                "No ground-truth thetas provided; use observe() to inject "
-                "external comparisons instead of running the sampler."
-            )
+    #     Returns 1 if the canonical-first of (b1,b2) wins, else 0.
+    #     Uses the precomputed probability cache.
+    #     """
+    #     if not self._true_prob_cache:
+    #         raise RuntimeError(
+    #             "No ground-truth thetas provided; use observe() to inject "
+    #             "external comparisons instead of running the sampler."
+    #         )
+    #     key = _canonical(b1, b2)
+    #     p = self._true_prob_cache[(agent, key)]
+    #     draw = self.rng.random() < p
+    #     return 1 if draw else 0
+
+    def _sample_comparison(self, agent, b1, b2):
         key = _canonical(b1, b2)
         p = self._true_prob_cache[(agent, key)]
         draw = self.rng.random() < p
@@ -193,14 +199,25 @@ class P2ETG:
     # Stopping condition
     # ------------------------------------------------------------------
 
+    # def _pairwise_disjoint(self) -> bool:
+    #     """Stopping condition: every pair's CI on p̂ excludes 1/2."""
+    #     for state in self.agent_states.values():
+    #         for (lo, hi) in state.ci.values():
+    #             if not (lo > 0.5 or hi < 0.5):
+    #                 return False
+    #     return True
+
     def _pairwise_disjoint(self) -> bool:
-        """Stopping condition: every pair's CI on p̂ excludes 1/2."""
         for state in self.agent_states.values():
+            n = len(state.partners)
+            expected = n * (n - 1) // 2
+            if len(state.ci) < expected:
+                return False              # some pairs never compared
             for (lo, hi) in state.ci.values():
                 if not (lo > 0.5 or hi < 0.5):
                     return False
         return True
-
+    
     # ------------------------------------------------------------------
     # Epoch loop
     # ------------------------------------------------------------------

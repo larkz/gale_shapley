@@ -166,66 +166,66 @@ def bt_mle_mm(
 # Confidence intervals
 # ============================================================================
 
-def bt_pair_ci_width(
-    n_pair: int,
-    T_global: int,
-    constant: float = 1.0,
-) -> float:
-    """Half-width of the CI on the pairwise preference P(b_i ≻ b_j) for one agent.
+# def bt_pair_ci_width(
+#     n_pair: int,
+#     T_global: int,
+#     constant: float = 1.0,
+# ) -> float:
+#     """Half-width of the CI on the pairwise preference P(b_i ≻ b_j) for one agent.
 
-        w = sqrt( constant * log(T_global) / n_pair )
+#         w = sqrt( constant * log(T_global) / n_pair )
 
-    where:
-        n_pair   = number of direct comparisons between b_i and b_j
-        T_global = total number of comparisons drawn by the whole learner
-        constant = tunable coefficient (1.0 for a fixed-eta bound;
-                   larger for a uniform-over-time union bound)
+#     where:
+#         n_pair   = number of direct comparisons between b_i and b_j
+#         T_global = total number of comparisons drawn by the whole learner
+#         constant = tunable coefficient (1.0 for a fixed-eta bound;
+#                    larger for a uniform-over-time union bound)
 
-    Returns +inf if n_pair <= 0, so that unsampled pairs block the
-    stopping condition.
-    """
-    if n_pair <= 0:
-        return float("inf")
-    T = max(T_global, 2)
-    return math.sqrt(constant * math.log(T) / n_pair)
+#     Returns +inf if n_pair <= 0, so that unsampled pairs block the
+#     stopping condition.
+#     """
+#     if n_pair <= 0:
+#         return float("inf")
+#     T = max(T_global, 2)
+#     return math.sqrt(constant * math.log(T) / n_pair)
 
-def bt_pairwise_intervals(
-    items: List[Hashable],
-    counts: PairCounts,
-    T_global: int,
-    constant: float = 1.0,
-) -> Dict[Tuple[Hashable, Hashable], Tuple[float, float]]:
-    """Per-pair CIs on the empirical preference, centered at 1/2.
+# def bt_pairwise_intervals(
+#     items: List[Hashable],
+#     counts: PairCounts,
+#     T_global: int,
+#     constant: float = 1.0,
+# ) -> Dict[Tuple[Hashable, Hashable], Tuple[float, float]]:
+#     """Per-pair CIs on the empirical preference, centered at 1/2.
 
-    For each unordered pair {b_i, b_j}, the empirical preference of b_i over
-    b_j for the agent is
+#     For each unordered pair {b_i, b_j}, the empirical preference of b_i over
+#     b_j for the agent is
 
-        p̂_{ij} = wins[(b_i, b_j)] / total[(b_i, b_j)]
+#         p̂_{ij} = wins[(b_i, b_j)] / total[(b_i, b_j)]
 
-    and the CI is
+#     and the CI is
 
-        [ p̂_{ij} - w,  p̂_{ij} + w ]
+#         [ p̂_{ij} - w,  p̂_{ij} + w ]
 
-    with w = bt_pair_ci_width(total[(b_i, b_j)], T_global, constant).
+#     with w = bt_pair_ci_width(total[(b_i, b_j)], T_global, constant).
 
-    Interpretation of disjointness at the pair level:
-        CI excludes 1/2  =>  the agent's ordering between b_i and b_j is
-                             resolved with high confidence.
+#     Interpretation of disjointness at the pair level:
+#         CI excludes 1/2  =>  the agent's ordering between b_i and b_j is
+#                              resolved with high confidence.
 
-    Returns a dict keyed by the canonical unordered pair.
-    """
-    intervals: Dict[Tuple[Hashable, Hashable], Tuple[float, float]] = {}
-    for key, n in counts.total.items():
-        w = bt_pair_ci_width(n, T_global, constant=constant)
-        wins = counts.wins.get(key, 0)
-        p_hat = wins / n if n > 0 else 0.5
-        lo = max(p_hat - w, 0.0)
-        hi = min(p_hat + w, 1.0)
-        intervals[key] = (lo, hi)
-    return intervals
+#     Returns a dict keyed by the canonical unordered pair.
+#     """
+#     intervals: Dict[Tuple[Hashable, Hashable], Tuple[float, float]] = {}
+#     for key, n in counts.total.items():
+#         w = bt_pair_ci_width(n, T_global, constant=constant)
+#         wins = counts.wins.get(key, 0)
+#         p_hat = wins / n if n > 0 else 0.5
+#         lo = max(p_hat - w, 0.0)
+#         hi = min(p_hat + w, 1.0)
+#         intervals[key] = (lo, hi)
+#     return intervals
 
 
-def bt_ci_width(n_pair: int, t_global: int, constant: float = 0.1) -> float:
+def bt_ci_width(n_pair: int, t_global: int, constant: float = 1.0) -> float:
     """Hoeffding-style half-width from the paper:
 
         w = sqrt( 6 * log(t) / T )
