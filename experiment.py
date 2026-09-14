@@ -73,6 +73,7 @@ def gs_on_true_preferences(men, women, true_theta_men, true_theta_women):
 def run_single(
     N: int, K: int, alpha: float, seed: int,
     max_epochs: int, adaptive: bool, check_every: int, max_samples: int,
+    constant: float = 0.1,
 ) -> Tuple[List[Dict], Dict]:
     """Run one experiment. Returns (per-round rows, summary dict)."""
     rng    = random.Random(seed)
@@ -91,6 +92,7 @@ def run_single(
         true_theta_men=true_theta_men,
         true_theta_women=true_theta_women,
         rng=rng,
+        constant=constant,
     )
     result = learner.run_with_trace(
         max_epochs=max_epochs,
@@ -162,6 +164,7 @@ def run_single(
         "stable_under_hat":   int(ok_hat),
         "reason_truth":       reason_true,
         "reason_hat":         reason_hat,
+        "constant": constant,
     }
     return rows, summary
 
@@ -170,14 +173,15 @@ def run_single(
 # ============================================================================
 
 def generate_data(
-    Ns: List[int] = [4, 6, 8],
-    Ks: List[int] = [4, 6, 8],
+    Ns: List[int] = [3],
+    Ks: List[int] = [3],
     alphas: List[float] = [0.5],
-    seeds: List[int] = list(range(3)),
+    seeds: List[int] = list(range(10)),
     max_epochs: int = 20,
     adaptive: bool = True,
     check_every: int = 50,
-    max_samples: int = 200_000_000,
+    max_samples: int = 100_000,
+    constant: float = 0.05,
 ) -> pd.DataFrame:
     """Run all configurations, save per-run CSVs and summaries, and return
     a long-format DataFrame for plotting."""
@@ -199,6 +203,7 @@ def generate_data(
                         adaptive=adaptive,
                         check_every=check_every,
                         max_samples=max_samples,
+                        constant=constant,
                     )
 
                     df = pd.DataFrame(rows)
@@ -362,12 +367,13 @@ def main():
     df_all = generate_data(
         Ns=[3],
         Ks=[3],
-        alphas=[0.5],
-        seeds=list(range(2)),
+        alphas=[1.0],
+        seeds=list(range(10)),
         max_epochs=3,
         adaptive=True,
         check_every=25,
-        max_samples=200_000,
+        max_samples=100_000,
+        constant = 0.25
     )
 
     print("\nLoading summaries...")

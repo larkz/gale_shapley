@@ -74,12 +74,14 @@ class P2ETG:
         true_theta_men: Optional[Dict[Man, Dict[Woman, float]]] = None,
         true_theta_women: Optional[Dict[Woman, Dict[Man, float]]] = None,
         rng: Optional[random.Random] = None,
+        constant: float = 0.1,
     ):
         self.men = list(men)
         self.women = list(women)
         self.true_theta_men = true_theta_men
         self.true_theta_women = true_theta_women
         self.rng = rng or random.Random(0)
+        self.constant = constant
 
         # One AgentState per participant
         self.agent_states: Dict[Hashable, AgentState] = {}
@@ -155,8 +157,16 @@ class P2ETG:
         return 1 if draw else 0
 
     def observe(self, agent: Hashable, b1: Hashable, b2: Hashable,
-                x: int) -> None:
-        """Inject an externally-supplied comparison outcome."""
+            x: int) -> None:
+        """Inject an externally-supplied comparison outcome.
+
+        Semantics of x:
+            x = 1  ->  the canonical-first of (b1, b2) won the comparison
+            x = 0  ->  the canonical-second won the comparison
+
+        This matches what _sample_comparison returns, so the internal
+        sampler and this external API use the same convention.
+        """
         self.agent_states[agent].counts.record(b1, b2, x)
 
     # ------------------------------------------------------------------
@@ -175,7 +185,7 @@ class P2ETG:
                 theta_init=state.theta,
             )
             state.ci = bt_confidence_intervals(
-                state.partners, state.theta, state.counts, self.t
+                state.partners, state.theta, state.counts, self.t, self.constant
             )
 
     # ------------------------------------------------------------------
