@@ -122,34 +122,35 @@ def bt_mle_mm(
 # Confidence intervals
 # ============================================================================
 
-def bt_ci_width(n_pair: int, t_global: int, constant: float = 0.1) -> float:
-    """Half-width of the pairwise CI:
-        w = sqrt( constant * log(t_global) / n_pair )
+def bt_ci_width(n_pair: int, t_global: int, constant: float = 0.1,
+                min_samples: int = 5) -> float:
+    """Half-width of the pairwise CI.
+
+    Returns +inf (so the interval becomes [0, 1] after clipping) when
+    n_pair < min_samples, since the Hoeffding bound is not meaningful
+    at such small counts.
     """
-    if n_pair <= 0:
+    if n_pair < min_samples:
         return float("inf")
     t = max(t_global, 2)
     return math.sqrt(constant * math.log(t) / n_pair)
 
 
-def bt_confidence_intervals(
-    items: List[Hashable],
-    theta_hat: Dict[Hashable, float],
-    counts: PairCounts,
-    t_global: int,
-    constant: float = 0.1,
-) -> Dict[Tuple[Hashable, Hashable], Tuple[float, float]]:
-    """Per-pair CI on the empirical preference p_hat = wins / n_pair.
 
-    Returns a dict keyed by the canonical unordered pair.
-    """
-    intervals: Dict[Tuple[Hashable, Hashable], Tuple[float, float]] = {}
+
+def bt_confidence_intervals(
+    items, theta_hat, counts, t_global, constant=0.1,
+):
+    intervals = {}
     for key, n in counts.total.items():
         w = bt_ci_width(n, t_global, constant)
         wins = counts.wins.get(key, 0)
         p_hat = wins / n if n > 0 else 0.5
-        lo = max(p_hat - w, 0.0)
-        hi = min(p_hat + w, 1.0)
+        if math.isinf(w):
+            lo, hi = 0.0, 1.0
+        else:
+            lo = max(p_hat - w, 0.0)
+            hi = min(p_hat + w, 1.0)
         intervals[key] = (lo, hi)
     return intervals
 
