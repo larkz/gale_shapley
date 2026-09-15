@@ -490,6 +490,25 @@ class RotationOperator:
         all_women = set(pair.woman for pair in matching.pairs) | set(matching.unmatched_women)
         
         return Matching.from_dict(new_dict, all_men, all_women)
+
+    # def perform_rotation(self, matching: Matching, rotation: List[Tuple[Man, Woman]]) -> Matching:
+    #     """
+    #     Eliminating rotation R = ((m_0, w_0), (m_1, w_1), ..., (m_{k-1}, w_{k-1}))
+    #     reassigns m_i to w_{i+1 (mod k)}.
+    #     """
+    #     new_dict = {pair.man: pair.woman for pair in matching.pairs}
+        
+    #     n = len(rotation)
+    #     for i in range(n):
+    #         man = rotation[i][0]
+    #         # m_i receives the woman from the NEXT pair in the cycle (w_{i+1})
+    #         next_woman = rotation[(i + 1) % n][1]
+    #         new_dict[man] = next_woman
+
+    #     all_men = set(pair.man for pair in matching.pairs) | set(matching.unmatched_men)
+    #     all_women = set(pair.woman for pair in matching.pairs) | set(matching.unmatched_women)
+        
+    #     return Matching.from_dict(new_dict, all_men, all_women)
     
     def get_rotation_effect(self, rotation: List[Tuple[Man, Woman]]) -> str:
         """Describe the effect of a rotation on participants."""
@@ -572,6 +591,67 @@ class StableMatchingLattice:
                 is_stable, _, _ = self.verifier.is_stable(new_matching)
                 if not is_stable:
                     print(f"Warning: Rotation produced unstable matching!")
+                    print(f"Current matching: {current_matching}")
+                    print(f"Rotation: {rotation}")
+                    print(f"New matching: {new_matching}")
+
+                    print("=== Rotation instability diagnostic ===")
+                    print("Verifier prefs id:", id(self.verifier.preferences))
+                    print("Rotator  prefs id:", id(self.rotator.preferences))
+                    print("Same object?     ", self.verifier.preferences is self.rotator.preferences)
+
+                    # Rotator's preferences for everyone in the rotation
+                    print("--- Rotator's preferences ---")
+                    for m, w in rotation:
+                        print(f"  prefs({m.id}) = "
+                            f"{[x.id for x in self.rotator.preferences.get_preference(m)]}")
+                        print(f"  prefs({w.id}) = "
+                            f"{[x.id for x in self.rotator.preferences.get_preference(w)]}")
+
+                    # Verifier's preferences for everyone in the rotation
+                    print("--- Verifier's preferences ---")
+                    for m, w in rotation:
+                        print(f"  prefs({m.id}) = "
+                            f"{[x.id for x in self.verifier.preferences.get_preference(m)]}")
+                        print(f"  prefs({w.id}) = "
+                            f"{[x.id for x in self.verifier.preferences.get_preference(w)]}")
+
+                    # Matching before / after
+                    current_dict = {p.man: p.woman for p in current_matching.pairs}
+                    new_dict = current_dict.copy()
+                    for i, (man, _) in enumerate(rotation):
+                        next_woman = rotation[(i + 1) % len(rotation)][1]
+                        new_dict[man] = next_woman
+                    print("Rotation:", [(m.id, w.id) for m, w in rotation])
+                    print("Before:  ", {m.id: w.id for m, w in current_dict.items()})
+                    print("After:   ", {m.id: w.id for m, w in new_dict.items()})
+                    print("Reason:  ", self.reason)
+
+                    # Is the CURRENT matching already stable?
+                    ok_current, reason_current, _ = self.verifier.is_stable(current_matching)
+                    print("Current matching stable?", ok_current, reason_current)
+                    print("=======================================")
+
+                    # print(f"  prefs({m.id}) = " f"{[x.id for x in self.preferences.get_preference(m)]}")
+                    # print(f"  prefs({w.id}) = " f"{[x.id for x in self.preferences.get_preference(w)]}")
+
+                    # print("Verifier's preference list for m1:",
+                    #     [x.id for x in self.verifier.preferences.get_preference(Man("m1"))])
+                    # print("Verifier's preference list for m2:",
+                    #     [x.id for x in self.verifier.preferences.get_preference(Man("m2"))])
+                    # print("Verifier's preference list for w1:",
+                    #     [x.id for x in self.verifier.preferences.get_preference(Woman("w1"))])
+                    # print("Verifier's preference list for w2:",
+                    #     [x.id for x in self.verifier.preferences.get_preference(Woman("w2"))])
+                    # print("Rotator's preference list for m1:",
+                    #     [x.id for x in self.rotator.preferences.get_preference(Man("m1"))])
+                    # print("Rotator's preference list for m2:",
+                    #     [x.id for x in self.rotator.preferences.get_preference(Man("m2"))])
+                    # print("Rotator's preference list for w1:",
+                    #     [x.id for x in self.rotator.preferences.get_preference(Woman("w1"))])
+                    # print("Rotator's preference list for w2:",
+                    #     [x.id for x in self.rotator.preferences.get_preference(Woman("w2"))])
+
                     continue
                 
                 # Get or create child node
