@@ -19,6 +19,7 @@ from gs_lib.gs_tools import (
     Man, Woman, PreferenceList, GaleShapley, StabilityVerifier,
 )
 from p2etg import P2ETG
+from providers import BradleyTerryProvider
 
 
 RUNS_DIR  = Path("runs")
@@ -67,10 +68,15 @@ def run_single(
 
     h_star = gs_on_true_preferences(men, women, true_theta_men, true_theta_women)
 
+    # Signal provider: BT model with the ground-truth θ.
+    # The learner never sees θ — only binary comparison outcomes.
+    provider = BradleyTerryProvider(
+        true_theta_men, true_theta_women, rng=rng,
+    )
+
     learner = P2ETG(
         men, women,
-        true_theta_men=true_theta_men,
-        true_theta_women=true_theta_women,
+        provider=provider,
         rng=rng,
         constant=constant,
     )
@@ -342,15 +348,15 @@ def plot_regret_by_N(df_sum: pd.DataFrame):
 def main():
     print("Generating data...")
     df_all = generate_data(
-        Ns=[5],
-        Ks=[5],
+        Ns=[10],
+        Ks=[10],
         alphas=[2.0],
-        seeds=list(range(100)),
+        seeds=list(range(50)),
         max_epochs=20,
         adaptive=True,
         check_every=25,
         max_samples=100_000,
-        constant=8.0,
+        constant=0.25,
     )
 
     print("\nLoading summaries...")

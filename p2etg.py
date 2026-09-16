@@ -5,8 +5,9 @@ Pairwise Two-Sided Explore-then-Gale-Shapley (P2ETG) learner.
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Dict, Hashable, List, Optional, Tuple
+from typing import Callable, Dict, Hashable, List, Optional, Tuple
 
 import random
 
@@ -17,6 +18,54 @@ from gs_lib.bt import (
     PairCounts, _canonical,
     bt_mle_mm, bt_confidence_intervals, bt_ranking,
 )
+
+
+# ============================================================================
+# Signal provider interface
+# ============================================================================
+
+class SignalProvider(ABC):
+    """Source of pairwise comparison outcomes for P2ETG.
+
+    P2ETG never sees a probability model. It asks the provider one
+    question, repeatedly:
+
+        "Does agent `a` prefer partner `b1` over partner `b2`?"
+
+    and receives a binary answer:
+        1  ->  b1 (canonical-first of (b1, b2)) is preferred
+        0  ->  b2 (canonical-second) is preferred
+
+    The provider may be stochastic, deterministic, time-varying, or
+    backed by a live system. P2ETG makes no assumptions beyond x ∈ {0, 1}.
+    """
+
+    @abstractmethod
+    def observe(self, agent: Hashable, b1: Hashable, b2: Hashable) -> int:
+        """Return 1 if `agent` prefers the canonical-first of (b1, b2)."""
+        raise NotImplementedError
+
+    def warmup(self, agent: Hashable, partners: List[Hashable]) -> None:
+        """Optional hook called once per agent before sampling begins.
+
+        Providers that need to precompute per-agent state (e.g. a BT
+        provider building a probability cache) can override this.
+        Default is a no-op.
+        """
+        return None
+
+
+class CallableProvider(SignalProvider):
+    """Wrap any function (agent, b1, b2) -> int into a SignalProvider."""
+
+    def __init__(self, fn: Callable[[Hashable, Hashable, Hashable], int]):
+        self._fn = fn
+
+    def observe(self, agent: Hashable, b1: Hashable, b2: Hashable) -> int:
+        x = self._fn(agent, b1, b2)
+        if x not in (0, 1):
+            raise ValueError(f"provider returned {x!r}, expected 0 or 1")
+        return int(x)
 
 
 # ============================================================================
@@ -49,15 +98,13 @@ class P2ETG:
         self,
         men: List[Man],
         women: List[Woman],
-        true_theta_men: Optional[Dict[Man, Dict[Woman, float]]] = None,
-        true_theta_women: Optional[Dict[Woman, Dict[Man, float]]] = None,
+        provider: SignalProvider,
         rng: Optional[random.Random] = None,
         constant: float = 0.1,
     ):
         self.men = list(men)
         self.women = list(women)
-        self.true_theta_men = true_theta_men
-        self.true_theta_women = true_theta_women
+        self.provider = provider
         self.rng = rng or random.Random(0)
         self.constant = constant
 
@@ -82,46 +129,26 @@ class P2ETG:
                     key = _canonical(partners[i], partners[j])
                     self._arms.append((agent, key, partners[i], partners[j]))
 
-        # Precompute true BT probabilities for every (agent, pair).
-        self._true_prob_cache: Dict[Tuple, float] = {}
-        if (self.true_theta_men is not None
-                and self.true_theta_women is not None):
-            for (agent, key, b1, b2) in self._arms:
-                self._true_prob_cache[(agent, key)] = self._true_prob(
-                    agent, b1, b2
-                )
+        # Warmup hook: allow the provider to precompute per-agent state.
+        for state in self.agent_states.values():
+            self.provider.warmup(state.agent, state.partners)
 
     # ------------------------------------------------------------------
     # Sampling
     # ------------------------------------------------------------------
 
-    def _true_prob(self, agent: Hashable, b1: Hashable, b2: Hashable) -> float:
-        """True BT probability that agent prefers canonical-first over second."""
-        if isinstance(agent, Man):
-            theta = self.true_theta_men[agent]
-        else:
-            theta = self.true_theta_women[agent]
-        key = _canonical(b1, b2)
-        if key[0] == b1:
-            t1, t2 = theta[b1], theta[b2]
-        else:
-            t1, t2 = theta[b2], theta[b1]
-        return t1 / (t1 + t2)
-
     def _sample_comparison(self, agent: Hashable, b1: Hashable,
                            b2: Hashable) -> int:
-        """Sample one Bernoulli comparison.
+        """Delegate one comparison to the signal provider.
 
         Returns 1 if the canonical-first of (b1, b2) won, else 0.
         """
-        if not self._true_prob_cache:
-            raise RuntimeError(
-                "No ground-truth thetas provided; use observe() to inject "
-                "external comparisons instead of running the sampler."
+        x = self.provider.observe(agent, b1, b2)
+        if x not in (0, 1):
+            raise ValueError(
+                f"SignalProvider returned {x!r} for ({agent}, {b1}, {b2})"
             )
-        key = _canonical(b1, b2)
-        p = self._true_prob_cache[(agent, key)]
-        return 1 if self.rng.random() < p else 0
+        return int(x)
 
     def observe(self, agent: Hashable, b1: Hashable, b2: Hashable,
                 x: int) -> None:
@@ -236,6 +263,39 @@ class P2ETG:
             self.t += 1
             new_samples += 1
         return new_samples
+
+    # ------------------------------------------------------------------
+    # Query API
+    # ------------------------------------------------------------------
+
+    def is_stopped(self) -> bool:
+        """True once the stopping condition has fired."""
+        return self.stopped
+
+    def committed_matching(self) -> Optional[Matching]:
+        """The frozen matching P2ETG committed to, or None if not yet stopped."""
+        return self.committed_matching
+
+    def estimated_preferences(self, agent: Hashable) -> List[Hashable]:
+        """Current empirical ranking ≻̂ for a given agent."""
+        return bt_ranking(self.agent_states[agent].theta)
+
+    def state_snapshot(self) -> Dict:
+        """JSON-serialisable view of the learner's current state."""
+        return {
+            "t": self.t,
+            "epoch": self.epoch,
+            "stopped": self.stopped,
+            "agents": {
+                str(agent): {
+                    "theta": {str(k): v for k, v in state.theta.items()},
+                    "ci": {f"{k[0]}|{k[1]}": v for k, v in state.ci.items()},
+                    "counts": {f"{k[0]}|{k[1]}": v
+                               for k, v in state.counts.total.items()},
+                }
+                for agent, state in self.agent_states.items()
+            },
+        }
 
     # ------------------------------------------------------------------
     # Top-level API

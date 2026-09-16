@@ -13,6 +13,7 @@ from gs_lib.gs_tools import (
     Man, Woman, PreferenceList, GaleShapley, StabilityVerifier,
 )
 from p2etg import P2ETG
+from providers import BradleyTerryProvider
 
 
 def random_theta(participants, partners, rng, alpha: float = 0.5):
@@ -44,10 +45,15 @@ def main(N: int = 4, K: int = 4, seed: int = 0, max_epochs: int = 20):
     h_star = gs_on_true_preferences(men, women, true_theta_men, true_theta_women)
     print(f"Oracle H_*: {h_star}")
 
+    # Signal provider: BT model with the ground-truth θ.
+    # The learner never sees θ — only binary comparison outcomes.
+    provider = BradleyTerryProvider(
+        true_theta_men, true_theta_women, rng=rng,
+    )
+
     learner = P2ETG(
         men, women,
-        true_theta_men=true_theta_men,
-        true_theta_women=true_theta_women,
+        provider=provider,
         rng=rng,
     )
     result = learner.run_until_stop(
