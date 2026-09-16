@@ -125,26 +125,29 @@ def run_single(
     cumulative_regret = 0
 
     if not raw_rounds:
-        # Algorithm never built a lattice — fill everything with the
-        # best-effort fallback matching up to T_end.
-        matching_str = str(pl_result["matching"])
-        correct = int(pl_result["matching"] == h_star)
-        disjoint = bool(pl_result["stopped"])
+        # Algorithm never built a lattice — no H* was ever computed.
+        # Fill everything with "None" and mark as unstable.
         for tt in range(1, T_end + 1):
-            cumulative_regret += (1 - correct)
+            cumulative_regret += 1
             rows.append({
                 "t": tt,
-                "matching_str": matching_str,
-                "disjoint": disjoint,
-                "correct": correct,
+                "matching_str": "None",
+                "disjoint": False,
+                "correct": 0,
                 "regret": cumulative_regret,
             })
     else:
         for r in raw_rounds:
             t_end = r["t"]
-            matching_str = r.get("H_star_str") or str(pl_result["matching"])
-            disjoint = (r.get("status") == "ok")
-            correct = int(matching_str == str(h_star))
+            if r.get("H_star_str"):
+                matching_str = r["H_star_str"]
+                disjoint = (r.get("status") in ("ok", "committed"))
+                correct = int(matching_str == str(h_star))
+            else:
+                # No H* was computed at this iteration — mark as unknown.
+                matching_str = "None"
+                disjoint = False
+                correct = 0
             for tt in range(prev_t + 1, t_end + 1):
                 cumulative_regret += (1 - correct)
                 rows.append({
@@ -158,8 +161,9 @@ def run_single(
 
         # Extend to horizon with the committed matching.
         if prev_t < T_end:
-            matching_str = str(pl_result["matching"])
-            correct = int(pl_result["matching"] == h_star)
+            committed = pl_result["matching"]
+            matching_str = str(committed)
+            correct = int(committed == h_star)
             for tt in range(prev_t + 1, T_end + 1):
                 cumulative_regret += (1 - correct)
                 rows.append({
@@ -270,10 +274,10 @@ def main():
         Ns=[3],
         Ks=[3],
         seeds=list(range(100)),
-        budgets=[5000],
-        constant=0.1,
+        budgets=[300000],
+        constant=0.005,
         max_iterations=10000,
-        horizon=100_000,       # <-- extend the timeline past T_stop
+        horizon=10000,       # <-- extend the timeline past T_stop
     )
 
     print(f"\nDone. Data in {RUNS_DIR.resolve()}/")
@@ -284,4 +288,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
