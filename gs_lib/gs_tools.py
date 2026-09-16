@@ -380,85 +380,103 @@ class RotationOperator:
     def find_exposed_rotations(self, matching: Matching) -> List[List[Tuple[Man, Woman]]]:
         """
         Find all rotations exposed in the current stable matching.
-        
+
         A rotation is a cycle (m1,w1), (m2,w2), ..., (mk,wk) where:
         - Each (mi, wi) is a pair in the matching
-        - For each i, w_{i+1} is the first woman on mi's list after wi 
-          who prefers mi to her current partner
-        
+        - For each i, w_{i+1} is the first woman on mi's list after wi
+        who prefers mi to her current partner
+
+        Unmatched women are always willing (they have no current partner),
+        so they can serve as next-best partners and terminate a chain
+        rather than participating in a cycle.
+
         Returns:
             List of rotations, each rotation is a list of (man, woman) pairs
         """
-        # Build dictionary mapping each person to their partner
-        partners = {}
+        # Build dictionary mapping each person to their partner.
+        # Unmatched participants are NOT keys here.
+        partners: Dict[Hashable, Hashable] = {}
         for pair in matching.pairs:
             partners[pair.man] = pair.woman
             partners[pair.woman] = pair.man
-        
-        # For each matched man, find his next best willing woman
+
+        # For each matched man, find his next-best willing woman.
+        # An unmatched woman is always willing; a matched woman is willing
+        # iff she prefers the man over her current partner.
         next_best: Dict[Man, Optional[Woman]] = {}
-        
+
         for pair in matching.pairs:
             man = pair.man
             current_woman = pair.woman
-            
-            # Find the first woman on his list after current_woman who prefers him
+
             pref_list = self.preferences.get_preference(man)
             try:
                 start_idx = pref_list.index(current_woman) + 1
             except ValueError:
-                continue  # current woman not in his list (shouldn't happen in stable matching)
-            
+                # Should not happen for a stable matching.
+                next_best[man] = None
+                continue
+
             found = False
             for woman in pref_list[start_idx:]:
-                # Check if woman is matched (she must be to be in a rotation)
-                if woman in partners:
-                    current_man_of_woman = partners[woman]
-                    # Check if she prefers this man over her current partner
-                    if self.preferences.prefers(woman, man, current_man_of_woman):
-                        next_best[man] = woman
-                        found = True
-                        break
-            
+                current_man_of_woman = partners.get(woman)   # None if unmatched
+                if current_man_of_woman is None:
+                    # Unmatched woman — always willing.
+                    next_best[man] = woman
+                    found = True
+                    break
+                if self.preferences.prefers(woman, man, current_man_of_woman):
+                    next_best[man] = woman
+                    found = True
+                    break
+
             if not found:
                 next_best[man] = None
-        
-        # Find cycles in the directed graph where edges are (man -> next_woman's current man)
-        rotations = []
-        visited = set()
-        
-        for man in next_best:
-            if man in visited or next_best[man] is None:
+
+        # Find cycles in the directed graph on men, where an edge
+        # m -> partners[next_best[m]] exists if next_best[m] is a matched woman.
+        # If next_best[m] is unmatched, the chain dead-ends — no cycle through m.
+        rotations: List[List[Tuple[Man, Woman]]] = []
+        globally_visited: set = set()
+
+        for start_man in next_best:
+            if start_man in globally_visited or next_best[start_man] is None:
                 continue
-            
-            # Try to find a cycle starting from this man
-            cycle_pairs = []
-            current_man = man
-            
-            while current_man not in visited and current_man in next_best and next_best[current_man] is not None:
-                visited.add(current_man)
-                current_woman = partners[current_man]
-                next_woman = next_best[current_man]
-                
-                cycle_pairs.append((current_man, current_woman))
-                
-                # Move to the man currently matched to next_woman
-                current_man = partners[next_woman]
-            
-            # Check if we found a cycle
-            if current_man in visited and current_man in next_best and next_best[current_man] is not None:
-                # Extract the cycle
-                cycle_start_idx = None
-                for i, (m, _) in enumerate(cycle_pairs):
-                    if m == current_man:
-                        cycle_start_idx = i
-                        break
-                
-                if cycle_start_idx is not None:
-                    rotation = cycle_pairs[cycle_start_idx:]
-                    if len(rotation) >= 2:  # Need at least 2 pairs for a rotation
+
+            # Walk this chain until we hit a visited man, a dead-end, or
+            # a repeat of a man already on this path.
+            path: List[Man] = []
+            path_index: Dict[Man, int] = {}
+            current_man: Optional[Man] = start_man
+
+            while (current_man is not None
+                and current_man not in globally_visited
+                and current_man in next_best
+                and next_best[current_man] is not None):
+
+                if current_man in path_index:
+                    # Cycle found: extract from the first occurrence.
+                    cycle_start = path_index[current_man]
+                    cycle_men = path[cycle_start:]
+                    rotation = [(m, partners[m]) for m in cycle_men]
+                    if len(rotation) >= 2:
                         rotations.append(rotation)
-        
+                    globally_visited.update(cycle_men)
+                    break
+
+                path_index[current_man] = len(path)
+                path.append(current_man)
+
+                next_woman = next_best[current_man]
+                # If the next-best woman is unmatched, the chain ends here.
+                if next_woman not in partners:
+                    break
+
+                current_man = partners[next_woman]
+
+            # Mark everything on this path as visited so we don't re-walk it.
+            globally_visited.update(path)
+
         return rotations
     
     def perform_rotation(self, matching: Matching, rotation: List[Tuple[Man, Woman]]) -> Matching:
@@ -490,6 +508,25 @@ class RotationOperator:
         all_women = set(pair.woman for pair in matching.pairs) | set(matching.unmatched_women)
         
         return Matching.from_dict(new_dict, all_men, all_women)
+
+    # def perform_rotation(self, matching: Matching, rotation: List[Tuple[Man, Woman]]) -> Matching:
+    #     """
+    #     Eliminating rotation R = ((m_0, w_0), (m_1, w_1), ..., (m_{k-1}, w_{k-1}))
+    #     reassigns m_i to w_{i+1 (mod k)}.
+    #     """
+    #     new_dict = {pair.man: pair.woman for pair in matching.pairs}
+        
+    #     n = len(rotation)
+    #     for i in range(n):
+    #         man = rotation[i][0]
+    #         # m_i receives the woman from the NEXT pair in the cycle (w_{i+1})
+    #         next_woman = rotation[(i + 1) % n][1]
+    #         new_dict[man] = next_woman
+
+    #     all_men = set(pair.man for pair in matching.pairs) | set(matching.unmatched_men)
+    #     all_women = set(pair.woman for pair in matching.pairs) | set(matching.unmatched_women)
+        
+    #     return Matching.from_dict(new_dict, all_men, all_women)
     
     def get_rotation_effect(self, rotation: List[Tuple[Man, Woman]]) -> str:
         """Describe the effect of a rotation on participants."""
@@ -572,6 +609,67 @@ class StableMatchingLattice:
                 is_stable, _, _ = self.verifier.is_stable(new_matching)
                 if not is_stable:
                     print(f"Warning: Rotation produced unstable matching!")
+                    print(f"Current matching: {current_matching}")
+                    print(f"Rotation: {rotation}")
+                    print(f"New matching: {new_matching}")
+
+                    print("=== Rotation instability diagnostic ===")
+                    print("Verifier prefs id:", id(self.verifier.preferences))
+                    print("Rotator  prefs id:", id(self.rotator.preferences))
+                    print("Same object?     ", self.verifier.preferences is self.rotator.preferences)
+
+                    # Rotator's preferences for everyone in the rotation
+                    print("--- Rotator's preferences ---")
+                    for m, w in rotation:
+                        print(f"  prefs({m.id}) = "
+                            f"{[x.id for x in self.rotator.preferences.get_preference(m)]}")
+                        print(f"  prefs({w.id}) = "
+                            f"{[x.id for x in self.rotator.preferences.get_preference(w)]}")
+
+                    # Verifier's preferences for everyone in the rotation
+                    print("--- Verifier's preferences ---")
+                    for m, w in rotation:
+                        print(f"  prefs({m.id}) = "
+                            f"{[x.id for x in self.verifier.preferences.get_preference(m)]}")
+                        print(f"  prefs({w.id}) = "
+                            f"{[x.id for x in self.verifier.preferences.get_preference(w)]}")
+
+                    # Matching before / after
+                    current_dict = {p.man: p.woman for p in current_matching.pairs}
+                    new_dict = current_dict.copy()
+                    for i, (man, _) in enumerate(rotation):
+                        next_woman = rotation[(i + 1) % len(rotation)][1]
+                        new_dict[man] = next_woman
+                    print("Rotation:", [(m.id, w.id) for m, w in rotation])
+                    print("Before:  ", {m.id: w.id for m, w in current_dict.items()})
+                    print("After:   ", {m.id: w.id for m, w in new_dict.items()})
+                    print("Reason:  ", self.reason)
+
+                    # Is the CURRENT matching already stable?
+                    ok_current, reason_current, _ = self.verifier.is_stable(current_matching)
+                    print("Current matching stable?", ok_current, reason_current)
+                    print("=======================================")
+
+                    # print(f"  prefs({m.id}) = " f"{[x.id for x in self.preferences.get_preference(m)]}")
+                    # print(f"  prefs({w.id}) = " f"{[x.id for x in self.preferences.get_preference(w)]}")
+
+                    # print("Verifier's preference list for m1:",
+                    #     [x.id for x in self.verifier.preferences.get_preference(Man("m1"))])
+                    # print("Verifier's preference list for m2:",
+                    #     [x.id for x in self.verifier.preferences.get_preference(Man("m2"))])
+                    # print("Verifier's preference list for w1:",
+                    #     [x.id for x in self.verifier.preferences.get_preference(Woman("w1"))])
+                    # print("Verifier's preference list for w2:",
+                    #     [x.id for x in self.verifier.preferences.get_preference(Woman("w2"))])
+                    # print("Rotator's preference list for m1:",
+                    #     [x.id for x in self.rotator.preferences.get_preference(Man("m1"))])
+                    # print("Rotator's preference list for m2:",
+                    #     [x.id for x in self.rotator.preferences.get_preference(Man("m2"))])
+                    # print("Rotator's preference list for w1:",
+                    #     [x.id for x in self.rotator.preferences.get_preference(Woman("w1"))])
+                    # print("Rotator's preference list for w2:",
+                    #     [x.id for x in self.rotator.preferences.get_preference(Woman("w2"))])
+
                     continue
                 
                 # Get or create child node
