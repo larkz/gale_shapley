@@ -5,9 +5,8 @@ Pairwise Two-Sided Explore-then-Gale-Shapley (P2ETG) learner.
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Callable, Dict, Hashable, List, Optional, Tuple
+from typing import Dict, Hashable, List, Optional, Tuple
 
 import random
 
@@ -20,61 +19,8 @@ from gs_lib.bt import (
 )
 
 
-# ============================================================================
-# Signal provider interface
-# ============================================================================
-
-class SignalProvider(ABC):
-    """Source of pairwise comparison outcomes for P2ETG.
-
-    P2ETG never sees a probability model. It asks the provider one
-    question, repeatedly:
-
-        "Does agent `a` prefer partner `b1` over partner `b2`?"
-
-    and receives a binary answer:
-        1  ->  b1 (canonical-first of (b1, b2)) is preferred
-        0  ->  b2 (canonical-second) is preferred
-
-    The provider may be stochastic, deterministic, time-varying, or
-    backed by a live system. P2ETG makes no assumptions beyond x ∈ {0, 1}.
-    """
-
-    @abstractmethod
-    def observe(self, agent: Hashable, b1: Hashable, b2: Hashable) -> int:
-        """Return 1 if `agent` prefers the canonical-first of (b1, b2)."""
-        raise NotImplementedError
-
-    def warmup(self, agent: Hashable, partners: List[Hashable]) -> None:
-        """Optional hook called once per agent before sampling begins.
-
-        Providers that need to precompute per-agent state (e.g. a BT
-        provider building a probability cache) can override this.
-        Default is a no-op.
-        """
-        return None
-
-
-class CallableProvider(SignalProvider):
-    """Wrap any function (agent, b1, b2) -> int into a SignalProvider."""
-
-    def __init__(self, fn: Callable[[Hashable, Hashable, Hashable], int]):
-        self._fn = fn
-
-    def observe(self, agent: Hashable, b1: Hashable, b2: Hashable) -> int:
-        x = self._fn(agent, b1, b2)
-        if x not in (0, 1):
-            raise ValueError(f"provider returned {x!r}, expected 0 or 1")
-        return int(x)
-
-
-# ============================================================================
-# Per-agent state
-# ============================================================================
-
 @dataclass
 class AgentState:
-    """State for a single agent learning preferences over the other side."""
     agent: Hashable
     partners: List[Hashable]
     counts: PairCounts = field(default_factory=PairCounts)
@@ -87,24 +33,20 @@ class AgentState:
             self.theta = {p: 1.0 / max(K, 1) for p in self.partners}
 
 
-# ============================================================================
-# Main learner
-# ============================================================================
-
 class P2ETG:
-    """Pairwise Two-Sided Explore-then-Gale-Shapley learner."""
-
     def __init__(
         self,
         men: List[Man],
         women: List[Woman],
-        provider: SignalProvider,
+        true_theta_men: Optional[Dict[Man, Dict[Woman, float]]] = None,
+        true_theta_women: Optional[Dict[Woman, Dict[Man, float]]] = None,
         rng: Optional[random.Random] = None,
         constant: float = 0.1,
     ):
         self.men = list(men)
         self.women = list(women)
-        self.provider = provider
+        self.true_theta_men = true_theta_men
+        self.true_theta_women = true_theta_women
         self.rng = rng or random.Random(0)
         self.constant = constant
 
@@ -119,7 +61,6 @@ class P2ETG:
         self.stopped = False
         self.committed_matching: Optional[Matching] = None
 
-        # Precompute the arms list once.
         self._arms: List[Tuple[Hashable, Tuple, Hashable, Hashable]] = []
         for state in self.agent_states.values():
             agent = state.agent
@@ -129,39 +70,40 @@ class P2ETG:
                     key = _canonical(partners[i], partners[j])
                     self._arms.append((agent, key, partners[i], partners[j]))
 
-        # Warmup hook: allow the provider to precompute per-agent state.
-        for state in self.agent_states.values():
-            self.provider.warmup(state.agent, state.partners)
+        self._true_prob_cache: Dict[Tuple, float] = {}
+        if (self.true_theta_men is not None
+                and self.true_theta_women is not None):
+            for (agent, key, b1, b2) in self._arms:
+                self._true_prob_cache[(agent, key)] = self._true_prob(
+                    agent, b1, b2
+                )
 
-    # ------------------------------------------------------------------
-    # Sampling
-    # ------------------------------------------------------------------
+    def _true_prob(self, agent: Hashable, b1: Hashable, b2: Hashable) -> float:
+        if isinstance(agent, Man):
+            theta = self.true_theta_men[agent]
+        else:
+            theta = self.true_theta_women[agent]
+        key = _canonical(b1, b2)
+        if key[0] == b1:
+            t1, t2 = theta[b1], theta[b2]
+        else:
+            t1, t2 = theta[b2], theta[b1]
+        return t1 / (t1 + t2)
 
     def _sample_comparison(self, agent: Hashable, b1: Hashable,
                            b2: Hashable) -> int:
-        """Delegate one comparison to the signal provider.
-
-        Returns 1 if the canonical-first of (b1, b2) won, else 0.
-        """
-        x = self.provider.observe(agent, b1, b2)
-        if x not in (0, 1):
-            raise ValueError(
-                f"SignalProvider returned {x!r} for ({agent}, {b1}, {b2})"
+        if not self._true_prob_cache:
+            raise RuntimeError(
+                "No ground-truth thetas provided; use observe() to inject "
+                "external comparisons instead of running the sampler."
             )
-        return int(x)
+        key = _canonical(b1, b2)
+        p = self._true_prob_cache[(agent, key)]
+        return 1 if self.rng.random() < p else 0
 
     def observe(self, agent: Hashable, b1: Hashable, b2: Hashable,
                 x: int) -> None:
-        """Inject an externally-supplied comparison outcome.
-
-        x = 1 means the canonical-first of (b1, b2) won.
-        x = 0 means the canonical-second won.
-        """
         self.agent_states[agent].counts.record(b1, b2, x)
-
-    # ------------------------------------------------------------------
-    # Estimation and interval updates
-    # ------------------------------------------------------------------
 
     def _refresh_estimates(self) -> None:
         for state in self.agent_states.values():
@@ -181,10 +123,6 @@ class P2ETG:
                 self.constant,
             )
 
-    # ------------------------------------------------------------------
-    # Gale-Shapley
-    # ------------------------------------------------------------------
-
     def _build_preference_lists(self) -> PreferenceList:
         prefs: Dict[Hashable, List[Hashable]] = {}
         for m in self.men:
@@ -197,12 +135,7 @@ class P2ETG:
         prefs = self._build_preference_lists()
         return GaleShapley(prefs).find_stable_matching(proposing_side="men")
 
-    # ------------------------------------------------------------------
-    # Stopping condition
-    # ------------------------------------------------------------------
-
     def _pairwise_disjoint(self) -> bool:
-        """Every pair's CI on p_hat must exclude 1/2."""
         for state in self.agent_states.values():
             n = len(state.partners)
             expected = n * (n - 1) // 2
@@ -213,40 +146,29 @@ class P2ETG:
                     return False
         return True
 
-    # ------------------------------------------------------------------
-    # Exploration loops
-    # ------------------------------------------------------------------
-
     def _run_epoch(self) -> int:
-        """One doubling epoch: sample all arms up to R = 2^epoch."""
         R = 2 ** self.epoch
         new_samples = 0
-
         active: List[Tuple[Hashable, Tuple, Hashable, Hashable]] = []
         for arm in self._arms:
             agent, key, b1, b2 = arm
             state = self.agent_states[agent]
             if state.counts.total.get(key, 0) < R:
                 active.append(arm)
-
         while active:
             idx = self.rng.randrange(len(active))
             agent, key, b1, b2 = active[idx]
             state = self.agent_states[agent]
-
             x = self._sample_comparison(agent, b1, b2)
             state.counts.record(b1, b2, x)
             self.t += 1
             new_samples += 1
-
             if state.counts.total.get(key, 0) >= R:
                 active[idx] = active[-1]
                 active.pop()
-
         return new_samples
 
     def _sample_batch(self, n: int) -> int:
-        """Draw n samples, always from the least-sampled arm."""
         new_samples = 0
         for _ in range(n):
             min_count = min(
@@ -264,43 +186,6 @@ class P2ETG:
             new_samples += 1
         return new_samples
 
-    # ------------------------------------------------------------------
-    # Query API
-    # ------------------------------------------------------------------
-
-    def is_stopped(self) -> bool:
-        """True once the stopping condition has fired."""
-        return self.stopped
-
-    def committed_matching(self) -> Optional[Matching]:
-        """The frozen matching P2ETG committed to, or None if not yet stopped."""
-        return self.committed_matching
-
-    def estimated_preferences(self, agent: Hashable) -> List[Hashable]:
-        """Current empirical ranking ≻̂ for a given agent."""
-        return bt_ranking(self.agent_states[agent].theta)
-
-    def state_snapshot(self) -> Dict:
-        """JSON-serialisable view of the learner's current state."""
-        return {
-            "t": self.t,
-            "epoch": self.epoch,
-            "stopped": self.stopped,
-            "agents": {
-                str(agent): {
-                    "theta": {str(k): v for k, v in state.theta.items()},
-                    "ci": {f"{k[0]}|{k[1]}": v for k, v in state.ci.items()},
-                    "counts": {f"{k[0]}|{k[1]}": v
-                               for k, v in state.counts.total.items()},
-                }
-                for agent, state in self.agent_states.items()
-            },
-        }
-
-    # ------------------------------------------------------------------
-    # Top-level API
-    # ------------------------------------------------------------------
-
     def run_until_stop(
         self,
         max_epochs: int = 400,
@@ -310,16 +195,8 @@ class P2ETG:
         verbose: bool = True,
         rounds: Optional[List[Tuple[int, Matching, bool]]] = None,
     ) -> Dict[str, object]:
-        """Run P2ETG until the stopping condition holds.
-
-        If `rounds` is a list, every check appends (t, matching, disjoint)
-        to it. Otherwise, nothing is recorded.
-        """
         trace: List[Dict[str, object]] = []
 
-        # ------------------------------------------------------------------
-        # Live-print helper (printing only; no bookkeeping side-effects)
-        # ------------------------------------------------------------------
         def _emit_line(epoch, R, new_samples, t, disjoint, matching):
             max_width = 0.0
             min_gap = float("inf")
@@ -339,12 +216,10 @@ class P2ETG:
                         overlap = -min(lo - 0.5, 0.5 - hi)
                     if worst_overlap is None or overlap > worst_overlap:
                         worst_overlap = overlap
-
             if min_gap == float("inf"):
                 min_gap = float("nan")
             if worst_overlap is None:
                 worst_overlap = float("nan")
-
             if not getattr(self, "_trace_header_printed", False):
                 hdr = (f"{'ep':>4} {'R':>8} {'new':>8} {'t':>10} "
                        f"{'disj':>6} {'maxWid':>8} {'minGap':>8} "
@@ -352,20 +227,15 @@ class P2ETG:
                 print(hdr)
                 print("-" * len(hdr))
                 self._trace_header_printed = True
-
             print(f"{epoch:>4} {R:>8} {new_samples:>8} {t:>10} "
                   f"{str(disjoint):>6} {max_width:>8.4f} {min_gap:>8.4f} "
                   f"{worst_overlap:>9.5f}  {matching}")
-
             return {
                 "max_width": max_width,
                 "min_gap": min_gap,
                 "worst_overlap": worst_overlap,
             }
 
-        # ------------------------------------------------------------------
-        # Adaptive mode
-        # ------------------------------------------------------------------
         if adaptive:
             while self.t < max_samples:
                 self._sample_batch(check_every)
@@ -411,9 +281,6 @@ class P2ETG:
                 "stopped": False,
             }
 
-        # ------------------------------------------------------------------
-        # Doubling mode
-        # ------------------------------------------------------------------
         for _ in range(max_epochs):
             if self.t >= max_samples:
                 break
@@ -462,10 +329,6 @@ class P2ETG:
             "stopped": False,
         }
 
-    # ------------------------------------------------------------------
-    # Thin wrapper that records rounds
-    # ------------------------------------------------------------------
-
     def run_with_trace(
         self,
         max_epochs: int = 400,
@@ -474,11 +337,6 @@ class P2ETG:
         max_samples: int = 2_000_000_000_000,
         verbose: bool = False,
     ) -> Dict[str, object]:
-        """Same as run_until_stop, but also returns a per-check trace.
-
-        Returns a dict with an additional key 'rounds':
-            rounds = [(t, matching, disjoint), ...]
-        """
         rounds: List[Tuple[int, Matching, bool]] = []
         result = self.run_until_stop(
             max_epochs=max_epochs,

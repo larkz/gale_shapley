@@ -109,13 +109,6 @@ def run_single(
 
     # ------------------------------------------------------------------
     # Build per-round timeline.
-    #
-    # Each raw round covers the interval (prev_t, t]. The matching played
-    # during that interval is the H* of the largest island at that round
-    # (or the final committed matching, if a round doesn't carry H*).
-    #
-    # After T_stop, if a horizon is specified and > T_stop, the committed
-    # matching is repeated up to horizon.
     # ------------------------------------------------------------------
     T_stop = pl_result["T_stop"]
     T_end = horizon if (horizon is not None and horizon > T_stop) else T_stop
@@ -126,7 +119,6 @@ def run_single(
 
     if not raw_rounds:
         # Algorithm never built a lattice — no H* was ever computed.
-        # Fill everything with "None" and mark as unstable.
         for tt in range(1, T_end + 1):
             cumulative_regret += 1
             rows.append({
@@ -144,7 +136,6 @@ def run_single(
                 disjoint = (r.get("status") in ("ok", "committed"))
                 correct = int(matching_str == str(h_star))
             else:
-                # No H* was computed at this iteration — mark as unknown.
                 matching_str = "None"
                 disjoint = False
                 correct = 0
@@ -159,7 +150,7 @@ def run_single(
                 })
             prev_t = t_end
 
-        # Extend to horizon with the committed matching.
+        # Extend to horizon with the committed matching (frozen).
         if prev_t < T_end:
             committed = pl_result["matching"]
             matching_str = str(committed)
@@ -220,6 +211,7 @@ def generate_data(
     constant: float = 0.1,
     max_iterations: int = 100,
     horizon: Optional[int] = None,
+    run_id: str = "",
 ) -> pd.DataFrame:
     all_rounds: List[Dict] = []
     all_summaries: List[Dict] = []
@@ -229,6 +221,8 @@ def generate_data(
             for budget in budgets:
                 for seed in seeds:
                     tag = f"N{N}_K{K}_b{budget}_seed{seed}"
+                    if run_id:
+                        tag = f"{run_id}_{tag}"
                     run_dir = RUNS_DIR / tag
                     run_dir.mkdir(exist_ok=True)
 
@@ -255,11 +249,13 @@ def generate_data(
                     print(f"T_stop={summary['preflid_T_stop']} "
                           f"correct={summary['preflid_correct']}")
 
+    prefix = f"{run_id}_" if run_id else ""
+
     df_rounds = pd.DataFrame(all_rounds)
-    df_rounds.to_csv(RUNS_DIR / "all_rounds.csv", index=False)
+    df_rounds.to_csv(RUNS_DIR / f"{prefix}all_rounds.csv", index=False)
 
     df_sum = pd.DataFrame(all_summaries)
-    df_sum.to_csv(RUNS_DIR / "all_summaries.csv", index=False)
+    df_sum.to_csv(RUNS_DIR / f"{prefix}all_summaries.csv", index=False)
 
     return df_sum
 
@@ -274,10 +270,11 @@ def main():
         Ns=[3],
         Ks=[3],
         seeds=list(range(100)),
-        budgets=[300000],
-        constant=0.005,
-        max_iterations=10000,
-        horizon=10000,       # <-- extend the timeline past T_stop
+        budgets=[31000],
+        constant=5.0,
+        max_iterations=600,
+        horizon=10000,
+        run_id="001",
     )
 
     print(f"\nDone. Data in {RUNS_DIR.resolve()}/")
