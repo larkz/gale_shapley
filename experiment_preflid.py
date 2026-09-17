@@ -97,6 +97,7 @@ def run_single(
             "preflid_islands_final": None,
             "preflid_correct": 0,
             "preflid_stable_truth": 0,
+            "preflid_reason": "exception",
             "p2etg_stopped": None,
             "p2etg_T_stop": None,
             "p2etg_correct": None,
@@ -127,6 +128,13 @@ def run_single(
                 "disjoint": False,
                 "correct": 0,
                 "regret": cumulative_regret,
+                "n_islands": None,
+                "n_lattices_largest_island": None,
+                "support_max": None,
+                "support_min": None,
+                "support_mean": None,
+                "status": "insufficient_iterations",
+                "reason": "insufficient_iterations",
             })
     else:
         for r in raw_rounds:
@@ -147,6 +155,13 @@ def run_single(
                     "disjoint": disjoint,
                     "correct": correct,
                     "regret": cumulative_regret,
+                    "n_islands": r.get("n_islands"),
+                    "n_lattices_largest_island": r.get("n_lattices_largest_island"),
+                    "support_max": r.get("support_max"),
+                    "support_min": r.get("support_min"),
+                    "support_mean": r.get("support_mean"),
+                    "status": r.get("status"),
+                    "reason": r.get("reason"),
                 })
             prev_t = t_end
 
@@ -163,6 +178,16 @@ def run_single(
                     "disjoint": True,
                     "correct": correct,
                     "regret": cumulative_regret,
+                    "n_islands": 1 if pl_result["stopped"] else None,
+                    "n_lattices_largest_island": None,
+                    "support_max": None,
+                    "support_min": None,
+                    "support_mean": None,
+                    "status": "committed" if pl_result["stopped"] else "fallback",
+                    "reason": pl_result.get(
+                        "reason",
+                        "certified" if pl_result["stopped"] else "max_iterations",
+                    ),
                 })
 
     # ---------------- P2ETG baseline ----------------
@@ -189,6 +214,10 @@ def run_single(
         "preflid_islands_final": pl_result["n_islands"],
         "preflid_correct": pl_correct,
         "preflid_stable_truth": int(pl_ok),
+        "preflid_reason": pl_result.get(
+            "reason",
+            "certified" if pl_result["stopped"] else "unknown",
+        ),
         # P2ETG
         "p2etg_stopped": bool(p2_result["stopped"]),
         "p2etg_T_stop": p2_result["T_stop"],
@@ -270,17 +299,20 @@ def main():
         Ns=[3],
         Ks=[3],
         seeds=list(range(100)),
-        budgets=[31000],
+        budgets=[310],
         constant=5.0,
         max_iterations=600,
         horizon=10000,
-        run_id="001",
+        run_id="v1",
     )
 
     print(f"\nDone. Data in {RUNS_DIR.resolve()}/")
     print(f"Total runs: {len(df_sum)}")
     print(f"Successful (correct): {df_sum['preflid_correct'].sum()}")
     print(f"Stopped: {df_sum['preflid_stopped'].sum()}")
+    if "preflid_reason" in df_sum.columns:
+        print(f"Stopping reasons:")
+        print(df_sum["preflid_reason"].value_counts().to_string())
 
 
 if __name__ == "__main__":

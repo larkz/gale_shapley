@@ -299,7 +299,11 @@ class PrefLID:
         """Run PrefLID until the island count is 1 (or fallback).
 
         `rounds`, if provided, is a list to which we append a dict per
-        iteration containing (t, n_islands, omega_size, center, H_star_str).
+        iteration. Each round dict contains:
+            t, iteration, center, n_samples, omega_size, n_islands,
+            n_lattices_largest_island, support_max, support_min,
+            support_mean, H_star_str, support, status, and (for the
+            committed round) reason.
 
         `verbose`, if True, enables per-iteration diagnostic prints and the
         gate-breakdown summary at the end of the run.
@@ -359,6 +363,9 @@ class PrefLID:
                         "t": self.t, "iteration": iteration,
                         "center": str(center), "n_samples": n_samples,
                         "omega_size": None, "n_islands": None,
+                        "n_lattices_largest_island": None,
+                        "support_max": None, "support_min": None,
+                        "support_mean": None,
                         "H_star_str": None,
                         "status": "insufficient_data",
                     })
@@ -382,6 +389,9 @@ class PrefLID:
                         "center": str(center), "n_samples": n_samples,
                         "omega_size": omega_size,
                         "n_islands": None,
+                        "n_lattices_largest_island": None,
+                        "support_max": None, "support_min": None,
+                        "support_mean": None,
                         "H_star_str": None,
                         "status": "over_budget",
                     })
@@ -401,6 +411,9 @@ class PrefLID:
                         "center": str(center), "n_samples": n_samples,
                         "omega_size": omega_size,
                         "n_islands": None,
+                        "n_lattices_largest_island": None,
+                        "support_max": None, "support_min": None,
+                        "support_mean": None,
                         "H_star_str": None,
                         "status": "lattice_too_large",
                     })
@@ -426,6 +439,10 @@ class PrefLID:
                     "center": str(center), "n_samples": n_samples,
                     "omega_size": omega_size,
                     "n_islands": len(islands),
+                    "n_lattices_largest_island": len(largest.lattice_indices),
+                    "support_max": largest.support_max,
+                    "support_min": largest.support_min,
+                    "support_mean": largest.support_mean,
                     "H_star_str": str(largest.H_star),
                     "support": largest.support,
                     "status": "ok",
@@ -442,14 +459,20 @@ class PrefLID:
                 # Record the commit explicitly so downstream code can
                 # distinguish "committed" from "still exploring".
                 if rounds is not None:
+                    single = islands[0]
                     rounds.append({
                         "t": self.t, "iteration": iteration,
                         "center": str(center), "n_samples": n_samples,
                         "omega_size": omega_size,
                         "n_islands": 1,
-                        "H_star_str": str(islands[0].H_star),
-                        "support": islands[0].support,
+                        "n_lattices_largest_island": len(single.lattice_indices),
+                        "support_max": single.support_max,
+                        "support_min": single.support_min,
+                        "support_mean": single.support_mean,
+                        "H_star_str": str(single.H_star),
+                        "support": single.support,
                         "status": "committed",
+                        "reason": "certified",
                     })
 
                 if verbose:
@@ -467,6 +490,7 @@ class PrefLID:
                     "islands": islands,
                     "lattices": lattices,
                     "omega": configs,
+                    "reason": "certified",
                     "gate_counts": dict(gate_counts),
                 }
 
