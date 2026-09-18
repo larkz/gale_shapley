@@ -483,6 +483,120 @@ def write_regret_plots(run_dir: Path) -> pd.DataFrame:
     plt.close(fig)
     logger.info("Wrote %s", out_dir / "cumulative_regret.png")
 
+    # ---- average-regret convergence figure: CR(T)/T ----
+    # Convergence reading: CR(T)/T -> the asymptotic instantaneous
+    # regret of the run's fixed point (0 for certified-correct stops;
+    # a positive plateau if the run settles on a suboptimal matching;
+    # a constant for fixed policies like random).
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5))
+    avg_by_label: Dict[str, np.ndarray] = {}
+    for i, (label, (cr_grid, cr_matrix, cr_t_ends)) in enumerate(
+        sorted(cumulative_data.items())
+    ):
+        color = colors[i % len(colors)]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            avg = cr_matrix / cr_grid[None, :]
+        avg[:, 0] = np.nan
+        avg_by_label[label] = avg
+
+        if avg.shape[0] <= 6:
+            for j in range(avg.shape[0]):
+                ax1.plot(cr_grid, avg[j], color=color, alpha=0.22, linewidth=0.9)
+        ax1.plot(
+            cr_grid, np.nanmean(avg, axis=0), color=color, linewidth=2.2,
+            label=label,
+        )
+        # log-log: decay rate of the early average regret
+        mask = cr_grid > 0
+        if avg.shape[0] <= 6:
+            for j in range(avg.shape[0]):
+                ax2.loglog(
+                    cr_grid[mask], avg[j][mask], color=color, alpha=0.22,
+                    linewidth=0.9,
+                )
+        ax2.loglog(
+            cr_grid[mask], np.nanmean(avg, axis=0)[mask], color=color,
+            linewidth=2.2,
+        )
+
+    # fixed-policy average regret = constant
+    ax1.axhline(
+        w_oracle - refs["random_mean"], linestyle="--", color="tab:gray",
+        linewidth=1.3, alpha=0.9,
+        label=f"random always ({w_oracle - refs['random_mean']:+.3f})",
+    )
+    ax1.axhline(
+        w_oracle - refs["hungarian_train"], linestyle=":", color="black",
+        linewidth=1.3, alpha=0.9,
+        label=f"Hungarian(train) ({w_oracle - refs['hungarian_train']:+.3f})",
+    )
+    ax1.axhline(0.0, color="black", linewidth=1.1, alpha=0.7)
+    ax1.set_xlabel("number of pairwise observations (t)")
+    ax1.set_ylabel("average regret  CR(t)/t")
+    ax1.set_title(
+        f"Average regret convergence ({run_dir.name})", fontsize=11,
+    )
+    ax1.legend(fontsize=8, loc="best")
+    ax1.grid(alpha=0.25)
+
+    # slope guides on log-log (anchored at the first check time where
+    # the mean average regret is finite)
+    t0 = None
+    for idx in range(1, len(cr_grid)):
+        vals = [avg[j, idx] for avg in avg_by_label.values() for j in range(avg.shape[0])]
+        if np.any(np.isfinite(vals)):
+            t0 = int(cr_grid[idx])
+            avg_ref_scale = float(np.nanmean(vals))
+            break
+    if t0 is None or not np.isfinite(avg_ref_scale) or avg_ref_scale <= 0:
+        t0, avg_ref_scale = 1, 1.0
+    t_guide = np.array([t0, cr_grid[-1]], dtype=float)
+    for alpha_exp, style in ((-0.5, "--"), (-1.0, ":")):
+        ax2.plot(
+            t_guide, avg_ref_scale * (t_guide / t0) ** alpha_exp,
+            linestyle=style, color="black", linewidth=1.1, alpha=0.8,
+            label=f"t^{alpha_exp:+.1f}",
+        )
+    ax2.set_xlabel("t (log scale)")
+    ax2.set_ylabel("average regret CR(t)/t (log scale)")
+    ax2.set_title("Average regret decay rate (log-log)", fontsize=11)
+    ax2.legend(fontsize=8, loc="best")
+    ax2.grid(alpha=0.25, which="both")
+
+    fig.tight_layout()
+    fig.savefig(out_dir / "average_regret_convergence.png", dpi=160)
+    plt.close(fig)
+    logger.info("Wrote %s", out_dir / "average_regret_convergence.png")
+
+    # ---- convergence summary columns ----
+    for row, label in zip(
+        summary_rows, [r["group"] for r in summary_rows]
+    ):
+        cr_grid, cr_matrix, cr_t_ends = cumulative_data[label]
+        avg = avg_by_label[label]
+        for thr in (1_000, 10_000, 25_000, 50_000, 100_000):
+            if cr_grid[-1] < thr:
+                continue
+            idx = int(np.searchsorted(cr_grid, thr))
+            vals = [
+                avg[j, min(idx, int(cr_t_ends[j]))] for j in range(avg.shape[0])
+            ]
+            row[f"avg_regret_at_{thr // 1000}k"] = float(np.nanmean(vals))
+        # average regret at each run's own horizon
+        end_vals = [avg[j, int(cr_t_ends[j])] for j in range(avg.shape[0])]
+        row["avg_regret_at_end"] = float(np.nanmean(end_vals))
+        # asymptotic instantaneous regret: mean over last 10% of horizon
+        asymp = []
+        for j in range(cr_matrix.shape[0]):
+            t_end = int(cr_t_ends[j])
+            lo = int(t_end * 0.9)
+            tail = cr_matrix[j, lo:t_end + 1]
+            if t_end > lo:
+                asymp.append(float((tail[-1] - tail[0]) / (t_end - lo)))
+        row["asymptotic_regret_mean"] = (
+            float(np.mean(asymp)) if asymp else float("nan")
+        )
+
     summary = pd.DataFrame(summary_rows)
     summary.to_csv(out_dir / "regret_summary.csv", index=False)
 

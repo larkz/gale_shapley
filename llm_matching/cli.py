@@ -229,6 +229,8 @@ def _run_subcommand(subcmd: str, argv: List[str]) -> int:
             "group", "n_seeds", "n_stopped", "final_regret_mean",
             "best_regret_mean", "committed_regret_mean",
             "cumulative_regret_end_mean", "cumulative_regret_end_std",
+            "avg_regret_at_10k", "avg_regret_at_50k", "avg_regret_at_end",
+            "asymptotic_regret_mean",
         ]
         print(summary[[c for c in cols if c in summary.columns]].to_string(index=False))
     return 0
