@@ -230,6 +230,39 @@ def _cumulative_trapezoid(grid: np.ndarray, values: np.ndarray) -> np.ndarray:
     return np.concatenate([[0.0], np.cumsum(incr)])
 
 
+def _locked_regret_curve(
+    df: pd.DataFrame, reference_welfare: float
+) -> Tuple[np.ndarray, np.ndarray]:
+    """HINDSIGHT curve: lock the matching at the FIRST oracle hit.
+
+    Instantaneous welfare = actual welfare until the first check where
+    H_t == H*_train, then exactly W(H*_train) forever -> instantaneous
+    regret 0 afterwards -> CR becomes exactly flat (parallel to the
+    x-axis) from the hit time on.
+
+    Diagnostic ONLY: locking at the first correct hit is not a valid
+    stopping rule (you cannot know the hit is correct without
+    hindsight); it visualises the price of not committing.
+    """
+    df = df.sort_values("t").drop_duplicates("t", keep="last")
+    exact = pd.to_numeric(df["exact_oracle_match"], errors="coerce").fillna(0)
+    hits = df.loc[exact.astype(bool), "t"]
+    grid = np.arange(0, int(df["t"].max()) + 1)
+    welfare = pd.to_numeric(df["test_welfare"], errors="coerce")
+    values = np.interp(
+        grid, df["t"].to_numpy(), welfare.to_numpy(),
+        left=np.nan, right=np.nan,
+    )
+    t_end = int(df["t"].max())
+    values[grid <= t_end] = (
+        pd.Series(values[grid <= t_end]).ffill().bfill().to_numpy()
+    )
+    if len(hits):
+        t_lock = int(hits.iloc[0])
+        values[grid >= t_lock] = reference_welfare
+    return grid, _cumulative_trapezoid(grid, reference_welfare - values)
+
+
 def _cumulative_curves(
     traces: List[pd.DataFrame],
     reference_welfare: float,
@@ -596,6 +629,159 @@ def write_regret_plots(run_dir: Path) -> pd.DataFrame:
         row["asymptotic_regret_mean"] = (
             float(np.mean(asymp)) if asymp else float("nan")
         )
+
+    # ---- commitment-freeze figure: CR becoming parallel to the x-axis ----
+    # A cumulative regret curve can only become flat once the run's
+    # instantaneous regret reaches (and stays at) 0, i.e. the committed
+    # matching IS H*_train. Two honest ways to display this:
+    #   (a) certified-correct stops (Matching-ID): CR is EXACTLY flat
+    #       after T_stop because the committed matching's welfare is
+    #       W(H*_train);
+    #   (b) hindsight lock-at-first-hit (dotted): diagnostic only —
+    #       shows what CR would look like if the run could commit at
+    #       its first correct matching.
+    fig, (axc, axs) = plt.subplots(1, 2, figsize=(13.5, 5.4))
+
+    cert_shown = 0
+    hindsight_shown = 0
+    for i, (label, group) in enumerate(sorted(groups.items())):
+        per_seed = group["per_seed"]
+        color = colors[i % len(colors)]
+        traces_group: List[pd.DataFrame] = group["traces"]
+
+        # (a) certified stops (solid bold; false certs dashed)
+        if per_seed is not None and {"stopped", "exact_oracle_match"} <= set(
+            per_seed.columns
+        ):
+            stopped = pd.to_numeric(per_seed["stopped"]) == 1
+            exact = pd.to_numeric(per_seed["exact_oracle_match"]) == 1
+            cc_seeds = set(per_seed.loc[stopped & exact, "seed"].astype(int))
+            fc_seeds = set(per_seed.loc[stopped & ~exact, "seed"].astype(int))
+            cr_grid, cr_matrix, cr_t_ends = cumulative_data[label]
+            for j, df in enumerate(traces_group):
+                seed = int(df["seed"].iloc[0])
+                if seed in cc_seeds:
+                    t_stop = int(cr_t_ends[j])
+                    axc.plot(
+                        cr_grid, cr_matrix[j], color=color, linewidth=2.0,
+                        alpha=0.95,
+                        label=(
+                            f"{label}: certified-correct seed {seed} "
+                            f"(flat after t={t_stop})"
+                        ) if cert_shown < 4 else None,
+                    )
+                    axc.plot(
+                        [t_stop], [cr_matrix[j, t_stop]], marker="x",
+                        color=color, markersize=8, markeredgewidth=1.8,
+                    )
+                    cert_shown += 1
+                elif seed in fc_seeds:
+                    axc.plot(
+                        cr_grid, cr_matrix[j], color=color, linewidth=1.4,
+                        linestyle="--", alpha=0.85,
+                        label=f"{label}: false-cert seed {seed}",
+                    )
+
+        # (b) hindsight lock-at-first-hit, one representative seed per
+        # group without certified-correct stops
+        has_cc = (
+            per_seed is not None
+            and {"stopped", "exact_oracle_match"} <= set(per_seed.columns)
+            and (
+                (pd.to_numeric(per_seed["stopped"]) == 1)
+                & (pd.to_numeric(per_seed["exact_oracle_match"]) == 1)
+            ).any()
+        )
+        if not has_cc:
+            best_df, best_t = None, None
+            for df in traces_group:
+                exact = pd.to_numeric(
+                    df["exact_oracle_match"], errors="coerce"
+                ).fillna(0).astype(bool)
+                hits = df.loc[exact, "t"]
+                if len(hits) and (best_t is None or int(hits.iloc[0]) < best_t):
+                    best_t = int(hits.iloc[0])
+                    best_df = df
+            if best_df is not None:
+                grid_l, cr_l = _locked_regret_curve(best_df, w_oracle)
+                axc.plot(
+                    grid_l, cr_l, color=color, linewidth=1.6, linestyle=":",
+                    alpha=0.95,
+                    label=(
+                        f"{label}: hindsight lock@first-hit seed "
+                        f"{int(best_df['seed'].iloc[0])} (t={best_t})"
+                    ) if hindsight_shown < 5 else None,
+                )
+                hindsight_shown += 1
+
+    if cert_shown or hindsight_shown:
+        axc.set_xlabel("number of pairwise observations (t)")
+        axc.set_ylabel("cumulative regret")
+        axc.set_title(
+            "Commitment freezes cumulative regret\n"
+            "(flat ⟺ committed matching = H*_train; dotted = hindsight "
+            "diagnostic, NOT a stopping rule)",
+            fontsize=10,
+        )
+        axc.legend(fontsize=7.5, loc="upper left")
+        axc.grid(alpha=0.25)
+    else:
+        axc.text(
+            0.5, 0.5, "no certified stops or oracle hits available",
+            ha="center", va="center", transform=axc.transAxes, fontsize=10,
+        )
+
+    # right panel: mean CR, all runs vs final-exact subset
+    for i, (label, group) in enumerate(sorted(groups.items())):
+        color = colors[i % len(colors)]
+        cr_grid, cr_matrix, cr_t_ends = cumulative_data[label]
+        mean_all = np.nanmean(cr_matrix, axis=0)
+        axs.plot(
+            cr_grid, mean_all, color=color, linewidth=1.8, linestyle="--",
+            alpha=0.85, label=f"{label} (all {cr_matrix.shape[0]} seeds)",
+        )
+        per_seed = group["per_seed"]
+        if per_seed is not None and "exact_oracle_match" in per_seed.columns:
+            ex_seeds = set(
+                per_seed.loc[
+                    pd.to_numeric(per_seed["exact_oracle_match"]) == 1, "seed"
+                ].astype(int)
+            )
+            idx = [
+                j for j, df in enumerate(group["traces"])
+                if int(df["seed"].iloc[0]) in ex_seeds
+            ]
+            if idx:
+                sub = cr_matrix[idx]
+                # tail slope of the subset mean (flat ⟺ slope 0)
+                t_end = cr_grid[-1]
+                lo = int(t_end * 0.9)
+                tail_slope = float(
+                    (np.nanmean(sub, axis=0)[-1] - np.nanmean(sub, axis=0)[lo])
+                    / max(t_end - lo, 1)
+                )
+                axs.plot(
+                    cr_grid, np.nanmean(sub, axis=0), color=color,
+                    linewidth=2.4,
+                    label=(
+                        f"{label} (final-exact {len(idx)}/{cr_matrix.shape[0]}, "
+                        f"tail slope {tail_slope:.2e}/t)"
+                    ),
+                )
+    axs.set_xlabel("number of pairwise observations (t)")
+    axs.set_ylabel("cumulative regret (mean)")
+    axs.set_title(
+        "Mean cumulative regret: all runs vs final-exact subset\n"
+        "(a flat tail requires holding H*_train, not just visiting it)",
+        fontsize=10,
+    )
+    axs.legend(fontsize=7.5, loc="upper left")
+    axs.grid(alpha=0.25)
+
+    fig.tight_layout()
+    fig.savefig(out_dir / "cumulative_regret_convergence.png", dpi=160)
+    plt.close(fig)
+    logger.info("Wrote %s", out_dir / "cumulative_regret_convergence.png")
 
     summary = pd.DataFrame(summary_rows)
     summary.to_csv(out_dir / "regret_summary.csv", index=False)
