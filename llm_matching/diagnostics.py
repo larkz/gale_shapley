@@ -326,7 +326,7 @@ def run_matching_id_study(
     if feedbacks is None:
         feedbacks = ["bt", "replay"]
     if algorithms is None:
-        algorithms = ["p2etg", "matching_id"]
+        algorithms = ["p2etg", "matching_id", "preflid"]
 
     ctx = build_context(config)
 

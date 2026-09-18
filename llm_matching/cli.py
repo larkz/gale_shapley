@@ -202,7 +202,7 @@ def _run_subcommand(subcmd: str, argv: List[str]) -> int:
         )
         combined = run_matching_id_study(
             config, seeds=seeds, feedbacks=["bt", "replay"],
-            algorithms=["p2etg", "matching_id"],
+            algorithms=["p2etg", "matching_id", "preflid"],
         )
         print(
             f"Matching-ID study done: {len(combined)} runs. Outputs in "

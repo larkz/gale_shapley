@@ -498,7 +498,7 @@ def _finalize_seed_summary(
     arm_final_annotated.to_csv(
         traces_dir / f"arm_final_seed_{seed:03d}.csv", index=False
     )
-    if recorder.arm_rows is not None:
+    if recorder is not None and recorder.arm_rows is not None:
         recorder.arm_rows.to_csv(
             traces_dir / f"arm_trace_seed_{seed:03d}.csv", index=False
         )
@@ -650,7 +650,11 @@ def run_matching_id_seed(
 
 
 def run_preflid_seed(
-    ctx: ExperimentContext, seed: int, feedback: str
+    ctx: ExperimentContext,
+    seed: int,
+    feedback: str,
+    arm_annotations: Optional[pd.DataFrame] = None,
+    save_arm_trace: bool = False,
 ) -> Tuple[pd.DataFrame, Dict[str, object]]:
     from preflid import PrefLID
 
@@ -676,35 +680,72 @@ def run_preflid_seed(
 
     final_matching: Matching = result["matching"]
     stopped = bool(result["stopped"])
-    t_stop = int(result["T_stop"])
 
     trace_df = pd.DataFrame(rounds)
     # H_star holds Matching objects; stringify before writing CSV.
     for col in ("support", "H_star_str", "H_star"):
         if col in trace_df.columns:
             trace_df[col] = trace_df[col].astype(str)
+    # Add the per-check columns shared with the other algorithms so the
+    # combined trace schema is uniform. PrefLID's own rounds have
+    # per-iteration semantics; the matching at check k is taken from
+    # H_star_str of the last lattice-computing round if present.
+    trace_df.insert(0, "seed", seed)
+    trace_df.insert(1, "algorithm", "preflid")
+    trace_df.insert(2, "feedback_mode", feedback)
+    if "H_star_str" in trace_df.columns:
+        trace_df["matching"] = trace_df["H_star_str"].ffill()
+    else:
+        trace_df["matching"] = None
 
-    rand_mean, _ = ctx.random_welfare_test
-    hung_test = test_welfare(ctx.hungarian, ctx.task_util["test"])
-    welfare = test_welfare(final_matching, ctx.task_util["test"])
+    def _row_metrics(matching_str_value):
+        m = _matching_from_str(matching_str_value) if matching_str_value else None
+        if m is None:
+            return (False, False, float("nan"), float("nan"))
+        return (
+            exact_oracle_match(m, ctx.oracle["train"]),
+            is_stable(ctx.prefs["train"], m),
+            test_welfare(m, ctx.task_util["test"]),
+            mean_test_score(m, ctx.task_util["test"]),
+        )
 
-    summary: Dict[str, object] = {
-        "seed": seed,
-        "algorithm": "preflid",
-        "feedback_mode": feedback,
-        "stopped": stopped,
-        "T_stop": t_stop,
-        "exact_oracle_match": exact_oracle_match(final_matching, ctx.oracle["train"]),
-        "stable_train": is_stable(ctx.prefs["train"], final_matching),
-        "blocking_pairs_train": count_blocking_pairs(ctx.prefs["train"], final_matching),
-        "resolved_fraction_at_stop": resolved_fraction(learner.agent_states),
-        "test_mean_score": mean_test_score(final_matching, ctx.task_util["test"]),
-        "test_welfare": welfare,
-        "normalized_test_welfare": normalized_welfare(welfare, rand_mean, hung_test),
-        "n_checks": len(trace_df),
-        "final_matching": matching_str(final_matching),
-    }
+    metrics = [_row_metrics(m) for m in trace_df["matching"]]
+    trace_df["exact_oracle_match"] = [m[0] for m in metrics]
+    trace_df["train_stable"] = [m[1] for m in metrics]
+    trace_df["test_welfare"] = [m[2] for m in metrics]
+    trace_df["test_mean_score"] = [m[3] for m in metrics]
+    trace_df["pairwise_resolved_fraction"] = [
+        resolved_fraction(learner.agent_states) for _ in range(len(trace_df))
+    ]
+    trace_df["stopped"] = stopped
+
+    traces_dir = ctx.out_dir / "traces"
+    traces_dir.mkdir(parents=True, exist_ok=True)
+    summary = _finalize_seed_summary(
+        ctx, learner, trace_df, None, seed, "preflid", feedback,
+        result, traces_dir, arm_annotations,
+    )
     return trace_df, summary
+
+
+def _matching_from_str(s: str) -> Optional[Matching]:
+    """Parse a Matching repr of the form
+    'Matching(pairs=[(m1-w1), (m2-w2)], ...)' into a Matching."""
+    import re
+
+    if not s or not isinstance(s, str):
+        return None
+    pairs = re.findall(r"\((\w+)-(\w+)\)", s)
+    if not pairs:
+        return None
+    from gs_lib.gs_tools import MatchPair
+
+    pair_objects = [MatchPair(Man(m), Woman(w)) for m, w in pairs]
+    return Matching.from_dict(
+        {p.man: p.woman for p in pair_objects},
+        {p.man for p in pair_objects},
+        {p.woman for p in pair_objects},
+    )
 
 
 # ============================================================================
@@ -808,7 +849,11 @@ def run_experiment(
             )
     else:
         def run_fn(seed: int):
-            return run_preflid_seed(ctx, seed, feedback)
+            return run_preflid_seed(
+                ctx, seed, feedback,
+                arm_annotations=arm_annotations,
+                save_arm_trace=save_arm_trace,
+            )
 
     summaries: List[Dict[str, object]] = []
     all_traces: List[pd.DataFrame] = []

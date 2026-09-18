@@ -516,17 +516,22 @@ def write_matching_id_comparison(
 
     # T_stop comparison
     fig, ax = plt.subplots(figsize=(8.5, 5))
-    combos = list(
-        zip(per_seed["algorithm"], per_seed["feedback_mode"])
-    )
-    labels = sorted({f"{a}\n({f})" for a, f in combos})
+    algorithm_order = [
+        a for a in ("p2etg", "matching_id", "preflid")
+        if a in set(per_seed["algorithm"])
+    ]
+    feedback_order = [
+        f for f in ("bt", "replay") if f in set(per_seed["feedback_mode"])
+    ]
+    labels = [f"{a}\n({f})" for a in algorithm_order for f in feedback_order]
     data, colors = [], []
     palette = {
         ("p2etg", "bt"): "tab:blue", ("p2etg", "replay"): "tab:cyan",
         ("matching_id", "bt"): "tab:red", ("matching_id", "replay"): "tab:orange",
+        ("preflid", "bt"): "tab:green", ("preflid", "replay"): "tab:olive",
     }
-    for algo in ("p2etg", "matching_id"):
-        for fb in ("bt", "replay"):
+    for algo in algorithm_order:
+        for fb in feedback_order:
             group = per_seed[
                 (per_seed["algorithm"] == algo) & (per_seed["feedback_mode"] == fb)
             ]
@@ -537,7 +542,10 @@ def write_matching_id_comparison(
         patch.set_facecolor(color)
         patch.set_alpha(0.6)
     ax.set_ylabel("T_stop (pairwise observations)")
-    ax.set_title("Stopping time: full-preference vs Matching-ID (4x4)", fontsize=11)
+    ax.set_title(
+        "Stopping time: full-preference vs certified stopping (4x4)",
+        fontsize=11,
+    )
     ax.grid(alpha=0.25, axis="y")
     fig.tight_layout()
     fig.savefig(plots_dir / "t_stop_comparison.png", dpi=160)
@@ -546,8 +554,8 @@ def write_matching_id_comparison(
     # resolved fraction at stop
     fig, ax = plt.subplots(figsize=(8.5, 5))
     data = []
-    for algo in ("p2etg", "matching_id"):
-        for fb in ("bt", "replay"):
+    for algo in algorithm_order:
+        for fb in feedback_order:
             group = per_seed[
                 (per_seed["algorithm"] == algo) & (per_seed["feedback_mode"] == fb)
             ]
