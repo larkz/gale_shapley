@@ -214,6 +214,65 @@ def _committed_welfare_map(per_seed: Optional[pd.DataFrame]) -> Dict[int, float]
 
 
 # ============================================================================
+# Cumulative regret
+# ============================================================================
+
+def _cumulative_trapezoid(grid: np.ndarray, values: np.ndarray) -> np.ndarray:
+    """Trapezoid cumulative integral of `values` over `grid` (step-1 grid).
+
+    Returns array of same length; CR[0] = 0. NaNs are treated as 0
+    contribution (they only occur before the first observation, where
+    values are backfilled anyway).
+    """
+    v = np.nan_to_num(values, nan=0.0)
+    dt = np.diff(grid)
+    incr = (v[1:] + v[:-1]) / 2.0 * dt
+    return np.concatenate([[0.0], np.cumsum(incr)])
+
+
+def _cumulative_curves(
+    traces: List[pd.DataFrame],
+    reference_welfare: float,
+    committed_welfare_by_seed: Optional[Dict[int, float]] = None,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """(grid, CR_matrix[n_seeds x len(grid)], t_end_per_seed).
+
+    t_end_per_seed[i] is the last observed check time of seed i (the
+    run's own horizon: T_stop for stopped runs, max_samples otherwise).
+    """
+    t_max = max(df["t"].max() for df in traces)
+    grid = np.arange(0, int(t_max) + 1)
+    rows = []
+    t_ends = []
+    for df in traces:
+        df = df.sort_values("t").drop_duplicates("t", keep="last")
+        seed = int(df["seed"].iloc[0])
+        welfare = pd.to_numeric(df["test_welfare"], errors="coerce")
+        values = np.interp(
+            grid, df["t"].to_numpy(), welfare.to_numpy(),
+            left=np.nan, right=np.nan,
+        )
+        t_end = int(df["t"].max())
+        t_ends.append(t_end)
+        values[grid <= t_end] = (
+            pd.Series(values[grid <= t_end]).ffill().bfill().to_numpy()
+        )
+        stopped = (
+            bool(pd.to_numeric(df["stopped"]).iloc[-1])
+            if "stopped" in df else False
+        )
+        if stopped:
+            fill = None
+            if committed_welfare_by_seed and seed in committed_welfare_by_seed:
+                fill = committed_welfare_by_seed[seed]
+            else:
+                fill = float(welfare.iloc[-1])
+            values[grid > t_end] = fill
+        rows.append(_cumulative_trapezoid(grid, reference_welfare - values))
+    return grid, np.vstack(rows), np.array(t_ends, dtype=int)
+
+
+# ============================================================================
 # Entry point
 # ============================================================================
 
@@ -244,6 +303,7 @@ def write_regret_plots(run_dir: Path) -> pd.DataFrame:
         "tab:purple", "tab:brown",
     ]
     summary_rows: List[dict] = []
+    cumulative_data: Dict[str, Tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
 
     for i, (label, group) in enumerate(sorted(groups.items())):
         traces: List[pd.DataFrame] = group["traces"]
@@ -258,6 +318,12 @@ def write_regret_plots(run_dir: Path) -> pd.DataFrame:
         mean = np.nanmean(regret, axis=0)
         ax.plot(grid, mean, color=color, linewidth=2.2, label=label)
 
+        # cumulative regret (same reference, same post-stop fill)
+        cr_grid, cr_matrix, cr_t_ends = _cumulative_curves(
+            traces, w_oracle, committed
+        )
+        cumulative_data[label] = (cr_grid, cr_matrix, cr_t_ends)
+
         # summary stats
         per_seed = group["per_seed"]
         final_regret = float(np.nanmean(regret[:, -1]))
@@ -271,6 +337,18 @@ def write_regret_plots(run_dir: Path) -> pd.DataFrame:
             if len(traces) > 1 else 0.0,
             "best_regret_mean": best_regret,
         }
+        # cumulative regret at each run's OWN horizon (T_stop when
+        # stopped): area under the regret curve while the run lived.
+        cr_at_end = np.array(
+            [
+                cr_matrix[j, int(cr_t_ends[j])]
+                for j in range(cr_matrix.shape[0])
+            ]
+        )
+        row["cumulative_regret_end_mean"] = float(cr_at_end.mean())
+        row["cumulative_regret_end_std"] = (
+            float(cr_at_end.std(ddof=1)) if len(cr_at_end) > 1 else 0.0
+        )
         if per_seed is not None and "test_welfare" in per_seed.columns:
             committed_regret = w_oracle - pd.to_numeric(
                 per_seed["test_welfare"], errors="coerce"
@@ -348,6 +426,62 @@ def write_regret_plots(run_dir: Path) -> pd.DataFrame:
     fig.savefig(out_dir / "regret_vs_hungarian.png", dpi=160)
     plt.close(fig)
     logger.info("Wrote %s", out_dir / "regret_vs_hungarian.png")
+
+    # ---- cumulative regret figure (vs H*_train) ----
+    fig, ax = plt.subplots(figsize=(9, 5.5))
+    for i, (label, (cr_grid, cr_matrix, cr_t_ends)) in enumerate(
+        sorted(cumulative_data.items())
+    ):
+        color = colors[i % len(colors)]
+        # faint individual cumulative curves when few seeds
+        if cr_matrix.shape[0] <= 6:
+            for j in range(cr_matrix.shape[0]):
+                ax.plot(
+                    cr_grid, cr_matrix[j], color=color, alpha=0.22,
+                    linewidth=0.9,
+                )
+        ax.plot(
+            cr_grid, np.nanmean(cr_matrix, axis=0), color=color,
+            linewidth=2.2, label=label,
+        )
+        # mark stopped runs' own horizons (cumulation stops there)
+        stopped_idx = [
+            j for j, df in enumerate(groups[label]["traces"])
+            if "stopped" in df and bool(pd.to_numeric(df["stopped"]).iloc[-1])
+        ]
+        for j in stopped_idx:
+            t_end = int(cr_t_ends[j])
+            ax.plot(
+                [t_end], [cr_matrix[j, t_end]], marker="x", color=color,
+                markersize=7, markeredgewidth=1.6, alpha=0.9,
+            )
+
+    # slope references: cumulative regret of fixed policies
+    t_ref = np.array([0, cr_grid[-1]])
+    ax.plot(
+        t_ref, (w_oracle - refs["random_mean"]) * t_ref,
+        linestyle="--", color="tab:gray", linewidth=1.3, alpha=0.9,
+        label=f"random-always slope ({w_oracle - refs['random_mean']:+.3f}/t)",
+    )
+    ax.plot(
+        t_ref, (w_oracle - refs["hungarian_train"]) * t_ref,
+        linestyle=":", color="black", linewidth=1.3, alpha=0.9,
+        label=f"Hungarian(train) slope ({w_oracle - refs['hungarian_train']:+.3f}/t)",
+    )
+
+    ax.set_xlabel("number of pairwise observations (t)")
+    ax.set_ylabel("cumulative regret  ∫ [W(H*_train) − W_test(H_t)] dτ")
+    ax.set_title(
+        f"Cumulative welfare regret vs. oracle ({run_dir.name}, "
+        "mean over seeds; × = certified stop)",
+        fontsize=11,
+    )
+    ax.legend(fontsize=8.5, loc="upper left")
+    ax.grid(alpha=0.25)
+    fig.tight_layout()
+    fig.savefig(out_dir / "cumulative_regret.png", dpi=160)
+    plt.close(fig)
+    logger.info("Wrote %s", out_dir / "cumulative_regret.png")
 
     summary = pd.DataFrame(summary_rows)
     summary.to_csv(out_dir / "regret_summary.csv", index=False)
