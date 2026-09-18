@@ -108,6 +108,7 @@ DEFAULT_CONFIG: Dict = {
         "constant": 0.1,
         "max_lattice_vertices": 5000,
         "min_samples_per_pair": 10,
+        "min_sample_ratio": 0.5,
     },
     "matching_id": {
         "max_profiles": 200_000,
@@ -664,6 +665,7 @@ def run_preflid_seed(
         budget=int(cfg.get("budget", 100)),
         max_lattice_vertices=int(cfg.get("max_lattice_vertices", 5000)),
         min_samples_per_pair=int(cfg.get("min_samples_per_pair", 10)),
+        min_sample_ratio=float(cfg.get("min_sample_ratio", 0.5)),
     )
     rounds: List[Dict] = []
     result = learner.run_until_stop(
@@ -677,7 +679,8 @@ def run_preflid_seed(
     t_stop = int(result["T_stop"])
 
     trace_df = pd.DataFrame(rounds)
-    for col in ("support", "H_star_str"):
+    # H_star holds Matching objects; stringify before writing CSV.
+    for col in ("support", "H_star_str", "H_star"):
         if col in trace_df.columns:
             trace_df[col] = trace_df[col].astype(str)
 
