@@ -163,6 +163,34 @@ recommended at 4x4 — lattice enumeration is expensive at 8x8).
 CLI arguments override YAML values. Run
 `pytest tests/llm_matching -q` for the test suite.
 
+## Phase-2 diagnostic commands
+
+```bash
+python -m llm_matching.cli bootstrap --config configs/llm_matching_8x8.yaml --num-bootstrap 500
+python -m llm_matching.cli sensitivity --config configs/llm_matching_8x8.yaml
+python -m llm_matching.cli diagnostics --config configs/llm_matching_8x8.yaml          # 5 BT + 5 replay seeds
+python -m llm_matching.cli matching-id --config configs/llm_matching_smoke.yaml --n-seeds 20
+python -m llm_matching.cli market-analysis --config configs/llm_matching_8x8.yaml
+```
+
+- `bootstrap` — statistical stability of the oracle matching under
+  TRAIN-instance resampling (outputs/<run>/bootstrap/).
+- `sensitivity` — per-arm criticality: utility gaps, bootstrap flip
+  probabilities, adjacent-reversal / pair-swap GS sensitivity
+  (outputs/<run>/sensitivity/, 448-arm table).
+- `diagnostics` — 5-seed BT + replay runs with hindsight metrics
+  (first-hit, occupancy, streaks) and unresolved critical/non-critical
+  arm counts (outputs/<run>/diagnostics_5seed/).
+- `matching-id` — exact assignment-aware certificate
+  (`llm_matching/matching_id.py`): stop when every preference profile
+  consistent with the certified CIs yields the same model-proposing GS
+  matching. Wrapper `MatchingIDP2ETG` keeps P2ETG sampling identical
+  and changes only the stopping rule.
+- `market-analysis` — full 20x15 LLMRouterBench pool diversity
+  diagnostics (outputs/<run>/market_analysis/).
+
+See `PHASE2_REPORT.md` at the repository root for measured results.
+
 ## 11. Output files
 
 Under `output_dir` (e.g. `outputs/llm_matching_8x8/`):

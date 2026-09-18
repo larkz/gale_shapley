@@ -36,6 +36,13 @@ from llm_matching.baselines import (
     hungarian_matching,
     random_welfare_stats,
 )
+from llm_matching.diagnostics import (
+    arm_row_with_annotations,
+    arm_state_rows,
+    annotation_lookup,
+    compute_run_diagnostics,
+    count_unresolved_critical,
+)
 from llm_matching.metrics import (
     count_blocking_pairs,
     exact_oracle_match,
@@ -102,6 +109,12 @@ DEFAULT_CONFIG: Dict = {
         "max_lattice_vertices": 5000,
         "min_samples_per_pair": 10,
     },
+    "matching_id": {
+        "max_profiles": 200_000,
+        "timeout_seconds": 5.0,
+        "certify_every": 1,
+    },
+    "save_arm_trace": False,
     "experiment": {"seeds": 30, "random_baseline_seeds": 200},
     "output_dir": "outputs/llm_matching",
 }
@@ -333,6 +346,13 @@ class TraceRecorder(list):
     P2ETG's run_until_stop(rounds=...) appends (t, matching, disjoint)
     after every check; this list subclass expands each tuple into the
     per-check trace row required by the experiment spec.
+
+    Optional extras:
+      * arm annotations (sensitivity table) -> per-check counts of
+        unresolved critical / non-critical arms;
+      * record_arms=True -> full per-arm per-check rows (large; enable
+        via config save_arm_trace);
+      * Matching-ID learners expose per-check certification info.
     """
 
     def __init__(
@@ -342,6 +362,8 @@ class TraceRecorder(list):
         algorithm: str,
         feedback_mode: str,
         learner,
+        arm_annotations: Optional[pd.DataFrame] = None,
+        record_arms: bool = False,
     ) -> None:
         super().__init__()
         self.ctx = ctx
@@ -349,6 +371,8 @@ class TraceRecorder(list):
         self.algorithm = algorithm
         self.feedback_mode = feedback_mode
         self.learner = learner
+        self._lookup = annotation_lookup(arm_annotations)
+        self._arm_rows: Optional[List[dict]] = [] if record_arms else None
 
     def append(self, item) -> None:  # type: ignore[override]
         t, matching, disjoint = item
@@ -369,7 +393,48 @@ class TraceRecorder(list):
             ),
             "stopped": bool(disjoint),
         }
+
+        # Matching-ID certification columns
+        cert = getattr(self.learner, "last_certification", None)
+        if hasattr(self.learner, "last_certification"):
+            row["certified"] = bool(disjoint)
+            if cert is not None:
+                row["certify_profiles_checked"] = cert.profiles_checked
+                row["certify_distinct_matchings"] = (
+                    cert.n_distinct_matchings_seen
+                )
+                row["certify_search_complete"] = cert.search_complete
+                row["certify_hit_cap"] = cert.hit_search_cap
+            else:
+                row["certify_profiles_checked"] = None
+                row["certify_distinct_matchings"] = None
+                row["certify_search_complete"] = None
+                row["certify_hit_cap"] = None
+
+        # Per-arm resolution state (needed for critical/unresolved counts
+        # and for the optional full arm trace)
+        arm_df = arm_state_rows(self.learner, self.seed, t)
+        records = arm_df.to_dict("records")
+        if self._lookup is not None or self._arm_rows is not None:
+            annotated = [
+                arm_row_with_annotations(r, self._lookup) for r in records
+            ]
+            unresolved = [r for r in annotated if not r["resolved"]]
+            critical = [
+                r for r in unresolved if r.get("local_matching_critical")
+            ]
+            row["unresolved_critical"] = len(critical)
+            row["unresolved_noncritical"] = len(unresolved) - len(critical)
+            if self._arm_rows is not None:
+                self._arm_rows.extend(annotated)
+
         super().append(row)
+
+    @property
+    def arm_rows(self) -> Optional[pd.DataFrame]:
+        if self._arm_rows is None:
+            return None
+        return pd.DataFrame(self._arm_rows)
 
 
 # ============================================================================
@@ -400,8 +465,85 @@ def build_provider(ctx: ExperimentContext, feedback: str, seed: int):
     raise ValueError(f"Unknown feedback mode {feedback!r}")
 
 
+def _finalize_seed_summary(
+    ctx: ExperimentContext,
+    learner,
+    trace_df: pd.DataFrame,
+    recorder: TraceRecorder,
+    seed: int,
+    algorithm: str,
+    feedback: str,
+    result: Dict[str, object],
+    traces_dir: Path,
+    arm_annotations: Optional[pd.DataFrame],
+    extra: Optional[Dict[str, object]] = None,
+) -> Dict[str, object]:
+    """Shared post-run work: arm state dumps, hindsight diagnostics,
+    per-seed summary row."""
+    final_matching: Matching = result["matching"]
+    stopped = bool(result["stopped"])
+    t_stop = int(result["T_stop"])
+
+    if not trace_df.empty and not stopped:
+        trace_df.loc[trace_df.index[-1], "stopped"] = False
+
+    # Final per-arm state dump (always; small).
+    arm_final = arm_state_rows(learner, seed, learner.t)
+    arm_final_records = [
+        arm_row_with_annotations(r, annotation_lookup(arm_annotations))
+        for r in arm_final.to_dict("records")
+    ]
+    arm_final_annotated = pd.DataFrame(arm_final_records)
+    arm_final_annotated.to_csv(
+        traces_dir / f"arm_final_seed_{seed:03d}.csv", index=False
+    )
+    if recorder.arm_rows is not None:
+        recorder.arm_rows.to_csv(
+            traces_dir / f"arm_trace_seed_{seed:03d}.csv", index=False
+        )
+
+    n_crit_final: Optional[int] = None
+    n_noncrit_final: Optional[int] = None
+    if arm_annotations is not None:
+        n_crit_final, n_noncrit_final = count_unresolved_critical(
+            arm_final_annotated
+        )
+
+    rand_mean, _ = ctx.random_welfare_test
+    hung_test = test_welfare(ctx.hungarian, ctx.task_util["test"])
+    welfare = test_welfare(final_matching, ctx.task_util["test"])
+
+    summary: Dict[str, object] = {
+        "seed": seed,
+        "algorithm": algorithm,
+        "feedback_mode": feedback,
+        "stopped": stopped,
+        "T_stop": t_stop,
+        "exact_oracle_match": exact_oracle_match(final_matching, ctx.oracle["train"]),
+        "stable_train": is_stable(ctx.prefs["train"], final_matching),
+        "blocking_pairs_train": count_blocking_pairs(ctx.prefs["train"], final_matching),
+        "resolved_fraction_at_stop": resolved_fraction(learner.agent_states),
+        "test_mean_score": mean_test_score(final_matching, ctx.task_util["test"]),
+        "test_welfare": welfare,
+        "normalized_test_welfare": normalized_welfare(welfare, rand_mean, hung_test),
+        "n_checks": len(trace_df),
+        "final_matching": matching_str(final_matching),
+        "unresolved_critical_final": n_crit_final,
+        "unresolved_noncritical_final": n_noncrit_final,
+    }
+    # Hindsight diagnostics (NOT stopping rules; diagnostics only).
+    summary.update(compute_run_diagnostics(trace_df))
+    if extra:
+        summary.update(extra)
+    return summary
+
+
 def run_p2etg_seed(
-    ctx: ExperimentContext, seed: int, feedback: str
+    ctx: ExperimentContext,
+    seed: int,
+    feedback: str,
+    arm_annotations: Optional[pd.DataFrame] = None,
+    save_arm_trace: bool = False,
 ) -> Tuple[pd.DataFrame, Dict[str, object]]:
     from p2etg import P2ETG
 
@@ -415,7 +557,9 @@ def run_p2etg_seed(
         constant=float(cfg.get("constant", 0.1)),
     )
     recorder = TraceRecorder(
-        ctx, seed=seed, algorithm="p2etg", feedback_mode=feedback, learner=learner
+        ctx, seed=seed, algorithm="p2etg", feedback_mode=feedback,
+        learner=learner, arm_annotations=arm_annotations,
+        record_arms=save_arm_trace,
     )
     result = learner.run_until_stop(
         max_epochs=int(cfg.get("max_epochs", 400)),
@@ -426,34 +570,81 @@ def run_p2etg_seed(
         rounds=recorder,
     )
 
-    final_matching: Matching = result["matching"]
-    stopped = bool(result["stopped"])
-    t_stop = int(result["T_stop"])
+    trace_df = pd.DataFrame(recorder)
+    traces_dir = ctx.out_dir / "traces"
+    traces_dir.mkdir(parents=True, exist_ok=True)
+    summary = _finalize_seed_summary(
+        ctx, learner, trace_df, recorder, seed, "p2etg", feedback,
+        result, traces_dir, arm_annotations,
+    )
+    return trace_df, summary
+
+
+def run_matching_id_seed(
+    ctx: ExperimentContext,
+    seed: int,
+    feedback: str,
+    arm_annotations: Optional[pd.DataFrame] = None,
+    save_arm_trace: bool = False,
+) -> Tuple[pd.DataFrame, Dict[str, object]]:
+    from llm_matching.matching_id import MatchingIDP2ETG
+
+    p2etg_cfg = ctx.config["p2etg"]
+    mid_cfg = ctx.config.get("matching_id", {})
+    provider = build_provider(ctx, feedback, seed)
+    learner = MatchingIDP2ETG(
+        men=ctx.men,
+        women=ctx.women,
+        provider=provider,
+        rng=random.Random(f"matching-id::{seed}"),
+        constant=float(p2etg_cfg.get("constant", 0.1)),
+        max_profiles=int(mid_cfg.get("max_profiles", 200_000)),
+        timeout_seconds=float(mid_cfg.get("timeout_seconds", 5.0)),
+        certify_every=int(mid_cfg.get("certify_every", 1)),
+    )
+    recorder = TraceRecorder(
+        ctx, seed=seed, algorithm="matching_id", feedback_mode=feedback,
+        learner=learner, arm_annotations=arm_annotations,
+        record_arms=save_arm_trace,
+    )
+    result = learner.run_until_stop(
+        adaptive=bool(p2etg_cfg.get("adaptive", True)),
+        check_every=int(p2etg_cfg.get("check_every", 448)),
+        max_samples=int(p2etg_cfg.get("max_samples", 200000)),
+        verbose=False,
+        rounds=recorder,
+    )
 
     trace_df = pd.DataFrame(recorder)
-    if not trace_df.empty and not stopped:
-        trace_df.loc[trace_df.index[-1], "stopped"] = False
+    traces_dir = ctx.out_dir / "traces"
+    traces_dir.mkdir(parents=True, exist_ok=True)
 
-    rand_mean, _ = ctx.random_welfare_test
-    hung_test = test_welfare(ctx.hungarian, ctx.task_util["test"])
-    welfare = test_welfare(final_matching, ctx.task_util["test"])
-
-    summary: Dict[str, object] = {
-        "seed": seed,
-        "algorithm": "p2etg",
-        "feedback_mode": feedback,
-        "stopped": stopped,
-        "T_stop": t_stop,
-        "exact_oracle_match": exact_oracle_match(final_matching, ctx.oracle["train"]),
-        "stable_train": is_stable(ctx.prefs["train"], final_matching),
-        "blocking_pairs_train": count_blocking_pairs(ctx.prefs["train"], final_matching),
-        "resolved_fraction_at_stop": resolved_fraction(learner.agent_states),
-        "test_mean_score": mean_test_score(final_matching, ctx.task_util["test"]),
-        "test_welfare": welfare,
-        "normalized_test_welfare": normalized_welfare(welfare, rand_mean, hung_test),
-        "n_checks": len(trace_df),
-        "final_matching": matching_str(final_matching),
+    certified = bool(result.get("stopped"))
+    cert = result.get("certification")
+    false_certification = bool(
+        certified
+        and not exact_oracle_match(result["matching"], ctx.oracle["train"])
+    )
+    extra = {
+        "false_certification": false_certification,
+        "certify_profiles_total": getattr(
+            learner, "certify_profiles_total", None
+        ),
+        "certify_seconds_total": getattr(
+            learner, "certify_seconds_total", None
+        ),
+        "n_certifications": getattr(learner, "n_certifications", None),
+        "last_certify_profiles_checked": (
+            cert.profiles_checked if cert is not None else None
+        ),
+        "last_certify_search_complete": (
+            cert.search_complete if cert is not None else None
+        ),
     }
+    summary = _finalize_seed_summary(
+        ctx, learner, trace_df, recorder, seed, "matching_id", feedback,
+        result, traces_dir, arm_annotations, extra=extra,
+    )
     return trace_df, summary
 
 
@@ -561,12 +752,15 @@ def run_experiment(
     seeds_override: Optional[List[int]] = None,
     make_plots: bool = True,
     make_report: bool = True,
+    arm_annotations: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
     """Run the full experiment; returns the per-seed summary frame."""
     if feedback is None:
         feedback = str(config["feedback"].get("mode", "bt"))
-    if algorithm not in ("p2etg", "preflid"):
+    if algorithm not in ("p2etg", "preflid", "matching_id"):
         raise ValueError(f"Unknown algorithm {algorithm!r}")
+
+    save_arm_trace = bool(config.get("save_arm_trace", False))
 
     ctx = build_context(config)
 
@@ -595,13 +789,29 @@ def run_experiment(
         except Exception:  # noqa: BLE001 - best-effort guard
             pass
 
-    run_fn = run_p2etg_seed if algorithm == "p2etg" else run_preflid_seed
+    if algorithm == "p2etg":
+        def run_fn(seed: int):
+            return run_p2etg_seed(
+                ctx, seed, feedback,
+                arm_annotations=arm_annotations,
+                save_arm_trace=save_arm_trace,
+            )
+    elif algorithm == "matching_id":
+        def run_fn(seed: int):
+            return run_matching_id_seed(
+                ctx, seed, feedback,
+                arm_annotations=arm_annotations,
+                save_arm_trace=save_arm_trace,
+            )
+    else:
+        def run_fn(seed: int):
+            return run_preflid_seed(ctx, seed, feedback)
 
     summaries: List[Dict[str, object]] = []
     all_traces: List[pd.DataFrame] = []
     for seed in seeds:
         logger.info("Running %s (%s feedback), seed=%d ...", algorithm, feedback, seed)
-        trace_df, summary = run_fn(ctx, seed, feedback)
+        trace_df, summary = run_fn(seed)
         trace_df.to_csv(traces_dir / f"seed_{seed:03d}.csv", index=False)
         all_traces.append(trace_df)
         summaries.append(summary)

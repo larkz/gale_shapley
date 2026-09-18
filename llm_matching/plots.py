@@ -254,8 +254,321 @@ def make_all_plots(
 
 
 # ============================================================================
-# Human-readable matching report
+# 5-seed diagnostic plots (Phase 2)
 # ============================================================================
+
+def _load_traces(mode_dir: Path) -> List[pd.DataFrame]:
+    traces = []
+    tdir = mode_dir / "traces"
+    if not tdir.is_dir():
+        return traces
+    for p in sorted(tdir.glob("seed_*.csv")):
+        if p.name.startswith("arm_"):
+            continue
+        df = pd.read_csv(p)
+        if not df.empty:
+            traces.append(df)
+    return traces
+
+
+def _mean_series(traces: List[pd.DataFrame], column: str):
+    """Union grid + per-seed forward fill within observed range."""
+    grid = np.arange(0, max(df["t"].max() for df in traces) + 1)
+    stacked = []
+    for df in traces:
+        sub = df.sort_values("t").drop_duplicates("t", keep="last")
+        values = np.interp(
+            grid, sub["t"].to_numpy(),
+            pd.to_numeric(sub[column], errors="coerce").to_numpy(),
+            left=np.nan, right=np.nan,
+        )
+        t_end = int(sub["t"].max())
+        values[grid <= t_end] = (
+            pd.Series(values[grid <= t_end]).ffill().bfill().to_numpy()
+        )
+        stopped = bool(pd.to_numeric(sub["stopped"]).iloc[-1])
+        if stopped:
+            values[grid > t_end] = sub[column].iloc[-1]
+        stacked.append(values)
+    return grid, np.vstack(stacked)
+
+
+def _plot_metric_5seed(
+    traces: List[pd.DataFrame],
+    column: str,
+    ylabel: str,
+    title: str,
+    out_path: Path,
+) -> None:
+    if not traces:
+        return
+    fig, ax = plt.subplots(figsize=(8, 5))
+    grid, matrix = _mean_series(traces, column)
+    for i, df in enumerate(traces):
+        sub = df.sort_values("t")
+        ax.plot(sub["t"], pd.to_numeric(sub[column], errors="coerce"),
+                color="tab:blue", alpha=0.25, linewidth=1.0)
+    mean = np.nanmean(matrix, axis=0)
+    ax.plot(grid, mean, color="black", linewidth=2.2, label="mean")
+    ax.set_xlabel("number of pairwise observations (t)")
+    ax.set_ylabel(ylabel)
+    ax.set_title(title, fontsize=11)
+    ax.legend(fontsize=9)
+    ax.grid(alpha=0.25)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=160)
+    plt.close(fig)
+    logger.info("Wrote %s", out_path)
+
+
+def _plot_occupancy_bars(summary: pd.DataFrame, out_path: Path, title: str) -> None:
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+    seeds = summary["seed"].tolist()
+    occ = pd.to_numeric(summary["oracle_occupancy"]).tolist()
+    colors = ["tab:green" if s else "tab:gray"
+              for s in pd.to_numeric(summary["stopped"])]
+    ax.bar([str(s) for s in seeds], occ, color=colors, alpha=0.85)
+    ax.axhline(0.5, linestyle="--", color="black", linewidth=1, alpha=0.6)
+    ax.set_ylim(0, 1)
+    ax.set_xlabel("seed")
+    ax.set_ylabel("oracle occupancy")
+    ax.set_title(title, fontsize=11)
+    ax.grid(alpha=0.25, axis="y")
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=160)
+    plt.close(fig)
+    logger.info("Wrote %s", out_path)
+
+
+def _plot_matching_changes(traces: List[pd.DataFrame], out_path: Path) -> None:
+    if not traces:
+        return
+    fig, ax = plt.subplots(figsize=(8, 5))
+    for df in traces:
+        df = df.sort_values("t")
+        matching = df["matching"].astype(str).to_numpy()
+        changes = np.zeros(len(df))
+        for i in range(1, len(matching)):
+            changes[i] = changes[i - 1] + (matching[i] != matching[i - 1])
+        ax.plot(df["t"], changes, alpha=0.6, linewidth=1.2,
+                label=f"seed {df['seed'].iloc[0]}")
+    ax.set_xlabel("number of pairwise observations (t)")
+    ax.set_ylabel("cumulative matching changes")
+    ax.set_title("Matching changes vs. queries", fontsize=11)
+    ax.legend(fontsize=8)
+    ax.grid(alpha=0.25)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=160)
+    plt.close(fig)
+    logger.info("Wrote %s", out_path)
+
+
+def _plot_critical_unresolved(
+    traces: List[pd.DataFrame], out_path: Path, title: str
+) -> None:
+    if not traces or "unresolved_critical" not in traces[0].columns:
+        return
+    fig, ax = plt.subplots(figsize=(8, 5))
+    grid, crit = _mean_series(traces, "unresolved_critical")
+    _, noncrit = _mean_series(traces, "unresolved_noncritical")
+    ax.plot(grid, np.nanmean(crit, axis=0), color="tab:red", linewidth=2.0,
+            label="unresolved critical arms")
+    ax.plot(grid, np.nanmean(noncrit, axis=0), color="tab:blue", linewidth=2.0,
+            label="unresolved non-critical arms")
+    ax.set_xlabel("number of pairwise observations (t)")
+    ax.set_ylabel("number of unresolved arms")
+    ax.set_title(title, fontsize=11)
+    ax.legend(fontsize=9)
+    ax.grid(alpha=0.25)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=160)
+    plt.close(fig)
+    logger.info("Wrote %s", out_path)
+
+
+def write_diagnostics_summary_and_plots(
+    diag_dir: Path,
+    combined: pd.DataFrame,
+    feedbacks: List[str],
+    seeds: List[int],
+) -> None:
+    """Write diagnostic_5seed_summary.csv and the section-18 plots."""
+    diag_dir.mkdir(parents=True, exist_ok=True)
+    plots_dir = diag_dir / "plots"
+    plots_dir.mkdir(parents=True, exist_ok=True)
+
+    combined.to_csv(diag_dir / "diagnostic_5seed_summary.csv", index=False)
+
+    for feedback in feedbacks:
+        mode_dir = diag_dir / feedback
+        traces = _load_traces(mode_dir)
+        sub = combined[combined["feedback"] == feedback]
+        if not traces:
+            continue
+        _plot_metric_5seed(
+            traces, "exact_oracle_match", "P(matching == H*_train)",
+            f"Exact oracle recovery vs. queries — {feedback.upper()} (5 seeds)",
+            plots_dir / f"matching_accuracy_vs_queries_5seed_{feedback}.png",
+        )
+        _plot_metric_5seed(
+            traces, "pairwise_resolved_fraction", "resolved fraction",
+            f"Pairwise resolution vs. queries — {feedback.upper()} (5 seeds)",
+            plots_dir / f"resolved_fraction_vs_queries_5seed_{feedback}.png",
+        )
+        _plot_occupancy_bars(
+            sub, plots_dir / f"oracle_occupancy_by_seed_{feedback}.png",
+            f"Oracle occupancy by seed — {feedback.upper()}",
+        )
+        _plot_matching_changes(
+            traces, plots_dir / f"matching_changes_vs_queries_{feedback}.png"
+        )
+        _plot_critical_unresolved(
+            traces,
+            plots_dir / f"critical_unresolved_vs_queries_{feedback}.png",
+            f"Unresolved critical vs non-critical arms — {feedback.upper()}",
+        )
+
+    # Combined BT vs replay
+    if len(feedbacks) == 2:
+        fig, axes = plt.subplots(1, 2, figsize=(13, 4.8))
+        for feedback, color in zip(feedbacks, ("tab:blue", "tab:orange")):
+            traces = _load_traces(diag_dir / feedback)
+            if not traces:
+                continue
+            grid, acc = _mean_series(traces, "exact_oracle_match")
+            axes[0].plot(grid, np.nanmean(acc, axis=0), color=color,
+                         linewidth=2.0, label=feedback)
+            _, res = _mean_series(traces, "pairwise_resolved_fraction")
+            axes[1].plot(grid, np.nanmean(res, axis=0), color=color,
+                         linewidth=2.0, label=feedback)
+        axes[0].set_title("Oracle recovery: BT vs replay", fontsize=11)
+        axes[0].set_ylabel("P(matching == H*_train)")
+        axes[1].set_title("Resolved fraction: BT vs replay", fontsize=11)
+        axes[1].set_ylabel("resolved fraction")
+        for ax in axes:
+            ax.set_xlabel("number of pairwise observations (t)")
+            ax.legend(fontsize=9)
+            ax.grid(alpha=0.25)
+        fig.tight_layout()
+        fig.savefig(plots_dir / "combined_bt_vs_replay.png", dpi=160)
+        plt.close(fig)
+
+        # Core diagnostic: unresolved critical vs non-critical (both modes)
+        fig, ax = plt.subplots(figsize=(8.5, 5.2))
+        for feedback in feedbacks:
+            traces = _load_traces(diag_dir / feedback)
+            if not traces or "unresolved_critical" not in traces[0].columns:
+                continue
+            grid, crit = _mean_series(traces, "unresolved_critical")
+            _, noncrit = _mean_series(traces, "unresolved_noncritical")
+            ax.plot(grid, np.nanmean(crit, axis=0), linewidth=2.0,
+                    label=f"{feedback}: critical")
+            ax.plot(grid, np.nanmean(noncrit, axis=0), linewidth=2.0,
+                    linestyle="--", label=f"{feedback}: non-critical")
+        ax.set_xlabel("number of pairwise observations (t)")
+        ax.set_ylabel("number of unresolved arms")
+        ax.set_title(
+            "Are remaining unresolved arms irrelevant to the matching?",
+            fontsize=11,
+        )
+        ax.legend(fontsize=9)
+        ax.grid(alpha=0.25)
+        fig.tight_layout()
+        fig.savefig(plots_dir / "unresolved_vs_matching_critical.png", dpi=160)
+        plt.close(fig)
+        logger.info("Wrote %s", plots_dir / "unresolved_vs_matching_critical.png")
+
+
+# ============================================================================
+# Matching-ID comparison plots (Phase 2)
+# ============================================================================
+
+def write_matching_id_comparison(
+    mid_dir: Path, per_seed: pd.DataFrame
+) -> pd.DataFrame:
+    """Aggregate + comparison plots for the 4x4 Matching-ID study."""
+    import numpy as np
+
+    plots_dir = mid_dir / "plots"
+    plots_dir.mkdir(parents=True, exist_ok=True)
+
+    metrics = [
+        "T_stop", "exact_oracle_match", "false_certification",
+        "resolved_fraction_at_stop", "test_welfare",
+        "certify_seconds_total",
+    ]
+    rows = []
+    for (algo, fb), group in per_seed.groupby(["algorithm", "feedback_mode"]):
+        row = {"algorithm": algo, "feedback": fb, "n_seeds": len(group)}  # noqa
+        for metric in metrics:
+            if metric in group.columns:
+                series = pd.to_numeric(
+                    group[metric], errors="coerce"
+                ).astype("float64")
+                row[f"{metric}_mean"] = float(series.mean())
+                row[f"{metric}_median"] = float(series.median())
+                row[f"{metric}_std"] = float(
+                    series.std(ddof=1)
+                ) if len(series) > 1 else 0.0
+        rows.append(row)
+    agg = pd.DataFrame(rows)
+    agg.to_csv(mid_dir / "aggregate_summary.csv", index=False)
+
+    # T_stop comparison
+    fig, ax = plt.subplots(figsize=(8.5, 5))
+    combos = list(
+        zip(per_seed["algorithm"], per_seed["feedback_mode"])
+    )
+    labels = sorted({f"{a}\n({f})" for a, f in combos})
+    data, colors = [], []
+    palette = {
+        ("p2etg", "bt"): "tab:blue", ("p2etg", "replay"): "tab:cyan",
+        ("matching_id", "bt"): "tab:red", ("matching_id", "replay"): "tab:orange",
+    }
+    for algo in ("p2etg", "matching_id"):
+        for fb in ("bt", "replay"):
+            group = per_seed[
+                (per_seed["algorithm"] == algo) & (per_seed["feedback_mode"] == fb)
+            ]
+            data.append(pd.to_numeric(group["T_stop"], errors="coerce").values)
+            colors.append(palette[(algo, fb)])
+    bp = ax.boxplot(data, tick_labels=labels, patch_artist=True)
+    for patch, color in zip(bp["boxes"], colors):
+        patch.set_facecolor(color)
+        patch.set_alpha(0.6)
+    ax.set_ylabel("T_stop (pairwise observations)")
+    ax.set_title("Stopping time: full-preference vs Matching-ID (4x4)", fontsize=11)
+    ax.grid(alpha=0.25, axis="y")
+    fig.tight_layout()
+    fig.savefig(plots_dir / "t_stop_comparison.png", dpi=160)
+    plt.close(fig)
+
+    # resolved fraction at stop
+    fig, ax = plt.subplots(figsize=(8.5, 5))
+    data = []
+    for algo in ("p2etg", "matching_id"):
+        for fb in ("bt", "replay"):
+            group = per_seed[
+                (per_seed["algorithm"] == algo) & (per_seed["feedback_mode"] == fb)
+            ]
+            data.append(
+                pd.to_numeric(
+                    group["resolved_fraction_at_stop"], errors="coerce"
+                ).values
+            )
+    bp = ax.boxplot(data, tick_labels=labels, patch_artist=True)
+    for patch, color in zip(bp["boxes"], colors):
+        patch.set_facecolor(color)
+        patch.set_alpha(0.6)
+    ax.set_ylabel("resolved fraction at stop")
+    ax.set_title("Preference resolution at stop (4x4)", fontsize=11)
+    ax.grid(alpha=0.25, axis="y")
+    fig.tight_layout()
+    fig.savefig(plots_dir / "resolved_fraction_at_stop.png", dpi=160)
+    plt.close(fig)
+
+    logger.info("Wrote Matching-ID comparison plots to %s", plots_dir)
+    return agg
 
 def _df_to_markdown(df: pd.DataFrame) -> str:
     """Minimal markdown table renderer (no tabulate dependency)."""
