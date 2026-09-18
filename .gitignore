@@ -37,3 +37,7 @@ scrap
 .*venv/
 .vscode/
 
+
+# LLM matching experiment artifacts
+outputs/
+.pytest_tmp/

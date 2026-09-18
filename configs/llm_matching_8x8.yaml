@@ -1,0 +1,68 @@
+# LLM-task stable matching experiment — main 8x8 market
+#
+# Men = 8 LLM models, Women = 8 task/dataset types.
+# Run from the gale_shapley repository root:
+#   python -m llm_matching.cli --config configs/llm_matching_8x8.yaml \
+#       --algorithm p2etg --feedback bt --seed 0
+
+routerbench_root: ../LLMRouterBench
+
+datasets:
+  - math500
+  - livecodebench
+  - bbh
+  - mmlupro
+  - finqa
+  - medqa
+  - meld
+  - korbench
+
+models:
+  - DeepSeek-R1-0528-Qwen3-8B
+  - Fin-R1
+  - Llama-3.1-8B-UltraMedical
+  - Qwen2.5-Coder-7B-Instruct
+  - Qwen3-8B
+  - Llama-3.1-8B-Instruct
+  - NVIDIA-Nemotron-Nano-9B-v2
+  - gemma-2-9b-it
+
+min_aligned_records: 100
+
+split:
+  train: 0.60
+  val: 0.20
+  test: 0.20
+  seed: 3407
+
+feedback:
+  mode: bt
+  target_median_win_probability: 0.70
+  replay_gamma: 0.25
+  replay_probability_epsilon: 0.01
+  model_replay_mode: probabilistic
+
+ties:
+  policy: deterministic_jitter
+  epsilon: 1.0e-6
+
+# 8x8 market: pairwise arms = 8*C(8,2) + 8*C(8,2) = 448,
+# so check_every=448 is one balanced sweep over all arms.
+p2etg:
+  adaptive: true
+  check_every: 448
+  max_samples: 200000
+  constant: 0.1
+
+preflid:
+  budget: 100
+  max_iterations: 200
+  constant: 0.1
+  max_lattice_vertices: 5000
+  min_samples_per_pair: 10
+
+experiment:
+  seeds: 30
+  random_baseline_seeds: 200
+
+output_dir: outputs/llm_matching_8x8

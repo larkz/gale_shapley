@@ -39,6 +39,7 @@ from gs_lib.islands import (
     PartitionStructure, build_partitions_from_cis, enumerate_configurations,
     lattice_from_configuration, construct_islands, Island,
 )
+from p2etg import SignalProvider
 
 
 # ============================================================================
@@ -69,6 +70,10 @@ class PrefLID:
     Args:
         men, women: A-side and B-side agents.
         true_theta_men, true_theta_women: ground-truth BT parameters.
+        provider: optional SignalProvider. When given, all comparisons
+            are delegated to provider.observe(...) instead of being
+            sampled from true_theta_*. When absent, the original
+            true-theta sampling behaviour is preserved exactly.
         rng: random.Random for reproducibility.
         constant: CI constant for the Hoeffding half-width.
         budget: computational budget for configuration enumeration (B_Sigma).
@@ -89,11 +94,13 @@ class PrefLID:
         budget: int = 100,
         max_lattice_vertices: int = 5000,
         min_samples_per_pair: int = 10,
+        provider: Optional[SignalProvider] = None,
     ):
         self.men = list(men)
         self.women = list(women)
         self.true_theta_men = true_theta_men
         self.true_theta_women = true_theta_women
+        self.provider = provider
         self.rng = rng or random.Random(0)
         self.constant = constant
         self.budget = budget
@@ -148,7 +155,19 @@ class PrefLID:
         return t1 / (t1 + t2)
 
     def _sample_comparison(self, agent: Hashable, b1: Hashable, b2: Hashable) -> int:
-        """Sample one Bernoulli draw. Returns 1 if canonical-first won."""
+        """Sample one comparison. Returns 1 if canonical-first won.
+
+        If a SignalProvider is attached, the observation is delegated to
+        it (x=1 means the canonical-first of (b1, b2) won). Otherwise the
+        original true-theta Bernoulli draw is used.
+        """
+        if self.provider is not None:
+            x = self.provider.observe(agent, b1, b2)
+            if x not in (0, 1):
+                raise ValueError(
+                    f"SignalProvider returned {x!r} for ({agent}, {b1}, {b2})"
+                )
+            return int(x)
         key = _canonical(b1, b2)
         p = self._true_prob_cache[(agent, key)]
         return 1 if self.rng.random() < p else 0
