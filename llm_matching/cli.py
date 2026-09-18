@@ -31,7 +31,8 @@ import yaml
 from llm_matching.runner import DEFAULT_CONFIG, deep_merge, run_experiment
 
 SUBCOMMANDS = (
-    "bootstrap", "sensitivity", "diagnostics", "matching-id", "market-analysis",
+    "bootstrap", "sensitivity", "diagnostics", "matching-id",
+    "market-analysis", "regret",
 )
 
 
@@ -216,6 +217,19 @@ def _run_subcommand(subcmd: str, argv: List[str]) -> int:
             f"{matrix.shape[1]} models. Outputs in "
             f"{Path(config['output_dir']) / 'market_analysis'}"
         )
+    elif subcmd == "regret":
+        from llm_matching.regret import write_regret_plots
+
+        summary = write_regret_plots(Path(config["output_dir"]))
+        print(
+            f"Regret plots done. Outputs in "
+            f"{Path(config['output_dir']) / 'regret'}"
+        )
+        cols = [
+            "group", "n_seeds", "n_stopped", "final_regret_mean",
+            "best_regret_mean", "committed_regret_mean",
+        ]
+        print(summary[[c for c in cols if c in summary.columns]].to_string(index=False))
     return 0
 
 
