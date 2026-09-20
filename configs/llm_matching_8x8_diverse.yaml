@@ -1,0 +1,79 @@
+# Diverse high-separation 8x8 market (selected from the full 20x15 pool)
+#
+# Selection: scripts/select_diverse_market.py (rationale in
+# outputs/llm_matching_8x8_diverse/market_selection.md).
+# Every task has a distinct top-1 model (8/8), mean pairwise task-rank
+# Spearman -0.062 (original 8x8 market: 0.55).
+#
+# Run the three-algorithm comparison:
+#   PYTHONHASHSEED=0 python -m llm_matching.cli matching-id \
+#     --config configs/llm_matching_8x8_diverse.yaml --n-seeds 20
+
+routerbench_root: ../LLMRouterBench
+
+datasets:
+  - emorynlp
+  - finqa
+  - humaneval
+  - kandk
+  - math500
+  - mbpp
+  - medqa
+  - meld
+
+models:
+  - DeepSeek-R1-0528-Qwen3-8B
+  - Fin-R1
+  - GLM-Z1-9B-0414
+  - Intern-S1-mini
+  - Qwen2.5-Coder-7B-Instruct
+  - Qwen3-8B
+  - gemma-2-9b-it
+  - glm-4-9b-chat
+
+min_aligned_records: 100
+
+split:
+  train: 0.60
+  val: 0.20
+  test: 0.20
+  seed: 3407
+
+feedback:
+  mode: bt
+  target_median_win_probability: 0.70
+  replay_gamma: 0.25
+  replay_probability_epsilon: 0.01
+  model_replay_mode: probabilistic
+
+ties:
+  policy: deterministic_jitter
+  epsilon: 1.0e-6
+
+p2etg:
+  adaptive: true
+  check_every: 448
+  max_samples: 50000
+  constant: 0.1
+
+preflid:
+  budget: 100
+  # 8x8: each RRT round = C(8,2) = 28 comparisons.
+  # 893 iterations ~ 25,004 observations (half the P2ETG budget; the
+  # lattice machinery makes full alignment too slow at this size).
+  max_iterations: 893
+  constant: 0.1
+  max_lattice_vertices: 5000
+  min_samples_per_pair: 10
+  min_sample_ratio: 0.5
+
+matching_id:
+  max_profiles: 200000
+  timeout_seconds: 2.0
+  certify_every: 1
+
+experiment:
+  seeds: 20
+  random_baseline_seeds: 200
+
+output_dir: outputs/llm_matching_8x8_diverse
