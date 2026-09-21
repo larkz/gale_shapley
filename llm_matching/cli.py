@@ -32,7 +32,7 @@ from llm_matching.runner import DEFAULT_CONFIG, deep_merge, run_experiment
 
 SUBCOMMANDS = (
     "bootstrap", "sensitivity", "diagnostics", "matching-id",
-    "market-analysis", "regret", "bandit",
+    "market-analysis", "regret", "bandit", "upstream-rep",
 )
 
 
@@ -44,6 +44,10 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--config", required=True, type=Path, help="Path to YAML config"
+    )
+    parser.add_argument(
+        "--preflid", action="store_true",
+        help="upstream-rep: replicate experiment_preflid.py instead of experiment.py",
     )
     parser.add_argument(
         "--algorithm",
@@ -217,6 +221,21 @@ def _run_subcommand(subcmd: str, argv: List[str]) -> int:
             f"{matrix.shape[1]} models. Outputs in "
             f"{Path(config['output_dir']) / 'market_analysis'}"
         )
+    elif subcmd == "upstream-rep":
+        from llm_matching.upstream_rep import generate_data
+
+        algo = "preflid" if args.preflid else "p2etg"
+        seeds = [int(s) for s in args.seed] if args.seed else list(range(50))
+        params = {}
+        if args.n_seeds and not args.seed:
+            seeds = list(range(args.n_seeds))
+        summary = generate_data(config, algorithm=algo, seeds=seeds, params=params)
+        out = Path(config["output_dir"]) / "runs_upstream" / algo
+        print(
+            f"Upstream-replication ({algo}) done: {len(summary)} seeds. "
+            f"Outputs in {out}"
+        )
+        print(summary.head(30).to_string(index=False))
     elif subcmd == "bandit":
         from llm_matching.bandit import run_matching_bandit
 

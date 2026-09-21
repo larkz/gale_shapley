@@ -1,0 +1,47 @@
+# Upstream replication: larkz/gale_shapley origin/main experiments
+# (experiment.py + experiment_preflid.py) with the market & reward from
+# the REAL diverse-korbench 8x8 LLMRouterBench market.
+#
+# Everything else follows upstream defaults (hardcoded in
+# llm_matching/upstream_rep.py): P2ETG adaptive=True, check_every=25,
+# max_samples=100_000, constant=0.25, POST_STOP_TAIL=200, dense 0/1
+# identification regret; PrefLID budget=300_000, constant=0.005,
+# max_iterations=10_000. No train/test split (upstream has none).
+#
+#   PYTHONHASHSEED=0 python -m llm_matching.cli upstream-rep \
+#     --config configs/llm_matching_upstream_rep_diverse.yaml --n-seeds 50
+#   PYTHONHASHSEED=0 python -m llm_matching.cli upstream-rep --preflid \
+#     --config configs/llm_matching_upstream_rep_diverse.yaml --n-seeds 20
+
+routerbench_root: ../LLMRouterBench
+datasets:
+- emorynlp
+- finqa
+- humaneval
+- korbench
+- math500
+- mbpp
+- medqa
+- meld
+models:
+- DeepSeek-R1-0528-Qwen3-8B
+- Fin-R1
+- GLM-Z1-9B-0414
+- Intern-S1-mini
+- Qwen2.5-Coder-7B-Instruct
+- Qwen3-8B
+- gemma-2-9b-it
+- glm-4-9b-chat
+min_aligned_records: 100
+split:
+  train: 0.6
+  val: 0.2
+  test: 0.2
+  seed: 3407
+feedback:
+  mode: bt
+  target_median_win_probability: 0.7
+ties:
+  policy: deterministic_jitter
+  epsilon: 1.0e-06
+output_dir: outputs/llm_matching_upstream_rep_diverse
