@@ -254,6 +254,9 @@ def run_single_preflid(
     learner = PrefLID(
         men=ctx["men"], women=ctx["women"], provider=provider,
         rng=random.Random(seed), constant=constant, budget=budget,
+        center_policy=str(
+            ctx["config"].get("preflid", {}).get("center_policy", "random")
+        ),
     )
 
     trace: List[Tuple[int, Optional[Matching]]] = []

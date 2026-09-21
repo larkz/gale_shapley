@@ -259,6 +259,7 @@ def run_bandit_seed(
             max_lattice_vertices=int(cfg.get("max_lattice_vertices", 5000)),
             min_samples_per_pair=int(cfg.get("min_samples_per_pair", 10)),
             min_sample_ratio=float(cfg.get("min_sample_ratio", 0.5)),
+            center_policy=str(cfg.get("center_policy", "random")),
         )
         wrapper = _RecordingPrefLID(learner, records, ctx.W)
         result = learner.run_until_stop(

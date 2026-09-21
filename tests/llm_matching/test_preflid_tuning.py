@@ -131,3 +131,30 @@ def test_preflid_true_theta_backward_compatible():
     # only asserts the legacy path runs and samples
     assert learner.t > 0
     assert result["T_stop"] == learner.t
+
+
+def test_round_robin_center_policy_balances_counts():
+    men, women = _market3()
+    learner = PrefLID(
+        men, women, provider=AlwaysCanonicalFirstProvider(), rng=random.Random(0),
+        min_samples_per_pair=1, min_sample_ratio=0.5,
+        center_policy="round_robin", budget=100,
+    )
+    learner.run_until_stop(max_iterations=100, verbose=False)
+    counts = [
+        min(state.counts.total.values())
+        for state in learner.agent_states.values()
+    ]
+    # every agent centered within 1 of every other (lockstep per pass)
+    assert max(counts) - min(counts) <= 1, counts
+    assert max(counts) >= 6  # ~100 iterations / 6 agents
+
+
+def test_round_robin_invalid_policy_rejected():
+    men, women = _market3()
+    try:
+        PrefLID(men, women, provider=AlwaysCanonicalFirstProvider(),
+                center_policy="bogus")
+        raise SystemExit("should have raised")
+    except ValueError:
+        pass

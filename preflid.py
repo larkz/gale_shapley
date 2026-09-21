@@ -73,6 +73,7 @@ class PrefLID:
         min_samples_per_pair: int = 10,
         min_sample_ratio: float = 0.5,
         provider: Optional[SignalProvider] = None,
+        center_policy: str = "random",
     ):
         self.men = list(men)
         self.women = list(women)
@@ -85,6 +86,13 @@ class PrefLID:
         self.max_lattice_vertices = max_lattice_vertices
         self.min_samples_per_pair = min_samples_per_pair
         self.min_sample_ratio = min_sample_ratio
+        if center_policy not in ("random", "round_robin"):
+            raise ValueError(
+                f"center_policy must be 'random' or 'round_robin', "
+                f"got {center_policy!r}"
+            )
+        self.center_policy = center_policy
+        self._rr_queue: List = []
 
         self.agent_states: Dict[Hashable, AgentState] = {}
         for m in self.men:
@@ -172,6 +180,27 @@ class PrefLID:
                 self.t,
                 self.constant,
             )
+
+    def _pick_center(self, remaining: List) -> Hashable:
+        """Choose the next RRT center.
+
+        random (upstream default): iid uniform -> per-agent arm counts
+        follow a multinomial fluctuation (the straggler agent can lag
+        the mean by ~30% early on, delaying the matching lock).
+
+        round_robin: every pass shuffles the eligible agents and cycles
+        through them once, so each agent is centered EXACTLY once per
+        pass -> per-agent arm counts grow in lockstep (like P2ETG's
+        uniform round-robin), eliminating the straggler.
+        """
+        if self.center_policy == "random":
+            return self.rng.choice(remaining)
+        remaining_set = set(remaining)
+        self._rr_queue = [a for a in self._rr_queue if a in remaining_set]
+        if not self._rr_queue:
+            self._rr_queue = list(remaining)
+            self.rng.shuffle(self._rr_queue)
+        return self._rr_queue.pop(0)
 
     # ------------------------------------------------------------------
     # RRT
@@ -334,7 +363,7 @@ class PrefLID:
             remaining = [a for a in all_agents if a not in U]
             if not remaining:
                 remaining = all_agents
-            center = self.rng.choice(remaining)
+            center = self._pick_center(remaining)
 
             n_samples = self.rrt_round(center)
 
