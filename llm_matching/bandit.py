@@ -293,11 +293,16 @@ def run_bandit_seed(
             }
         )
         prev_t, prev_regret = t, r
-    # freeze after stop (committed matching plays the remaining horizon)
+    # freeze after stop: the COMMITTED matching plays the remaining
+    # horizon at a constant regret. The stop round itself is the last
+    # recorded check (prev_t == t_stop for both algorithms), so the
+    # frozen phase is a piecewise-constant extension, NOT a trapezoid
+    # with the last MLE matching's regret (which smeared a transient
+    # last-check error into the frozen phase and halved false-cert
+    # costs).
     if stopped and t_stop < budget and rows:
         r_frozen = max(0.0, ctx.w_star - _welfare_of(committed, W))
-        dt = budget - t_stop
-        area += (prev_regret + r_frozen) / 2.0 * dt
+        area += r_frozen * (budget - t_stop)
         rows.append(
             {
                 "algorithm": algorithm, "seed": seed, "t": budget,
