@@ -64,6 +64,17 @@ class RouterBenchBTProvider(SignalProvider):
 
     theta_task[task][model]  = exp(eta_T * U_d^strict(m))
     theta_model[model][task] = exp(eta_M * V_m^strict(d))
+
+    probability_floor > 0 GUARANTEES NO TIES in the reward channel:
+    every pairwise win probability is clamped away from 1/2 by at
+    least `probability_floor`, in the direction of the (jittered)
+    strict preference. Exact utility ties — which would otherwise
+    give p = 0.500000x and be structurally unresolvable — become
+    p = 0.5 + floor in the tie-broken direction; weak-but-real
+    signals below the floor are boosted to the floor. Preferences,
+    the oracle H*, and welfare are UNCHANGED: only the observation
+    channel is separated. Resolution guarantee: every arm resolves
+    at n ~ c*ln(t)/floor^2 samples (c = the CI constant).
     """
 
     def __init__(
@@ -71,10 +82,12 @@ class RouterBenchBTProvider(SignalProvider):
         theta_task: Dict[Hashable, Dict[Hashable, float]],
         theta_model: Dict[Hashable, Dict[Hashable, float]],
         rng: random.Random,
+        probability_floor: float = 0.0,
     ) -> None:
         self.theta_task = theta_task
         self.theta_model = theta_model
         self.rng = rng
+        self.probability_floor = float(probability_floor)
 
     def observe(self, agent: Hashable, b1: Hashable, b2: Hashable) -> int:
         # Normalise to stable id strings (Man/Woman objects do not
@@ -100,6 +113,16 @@ class RouterBenchBTProvider(SignalProvider):
 
         t1, t2 = table[c1_id], table[c2_id]
         p_c1_wins = t1 / (t1 + t2)
+        if self.probability_floor > 0.0:
+            eps = self.probability_floor
+            if p_c1_wins > 0.5:
+                p_c1_wins = max(p_c1_wins, 0.5 + eps)
+            elif p_c1_wins < 0.5:
+                p_c1_wins = min(p_c1_wins, 0.5 - eps)
+            else:
+                # theta collision (should not happen after jitter):
+                # deterministic direction toward the larger theta
+                p_c1_wins = 0.5 + eps if t1 >= t2 else 0.5 - eps
         return 1 if self.rng.random() < p_c1_wins else 0
 
 

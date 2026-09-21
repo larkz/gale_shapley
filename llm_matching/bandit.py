@@ -217,6 +217,9 @@ def run_bandit_seed(
     provider = RouterBenchBTProvider(
         ctx.theta_task, ctx.theta_model,
         rng=random.Random(f"bandit::bt::{seed}"),
+        probability_floor=float(
+            ctx.config.get("feedback", {}).get("probability_floor", 0.0)
+        ),
     )
 
     if algorithm == "p2etg":

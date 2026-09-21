@@ -515,6 +515,9 @@ def build_provider(ctx: ExperimentContext, feedback: str, seed: int):
             theta_task=ctx.theta_task,
             theta_model=ctx.theta_model,
             rng=random.Random(f"bt-provider::{seed}"),
+            probability_floor=float(
+                feedback_cfg.get("probability_floor", 0.0)
+            ),
         )
     if feedback == "replay":
         return RouterBenchReplayProvider(

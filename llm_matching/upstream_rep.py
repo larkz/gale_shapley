@@ -164,6 +164,9 @@ def run_single_p2etg(
     provider = RouterBenchBTProvider(
         ctx["theta_task"], ctx["theta_model"],
         rng=random.Random(f"uprep::bt::{seed}"),
+        probability_floor=float(
+            ctx["config"].get("feedback", {}).get("probability_floor", 0.0)
+        ),
     )
     from p2etg import P2ETG
 
@@ -242,6 +245,9 @@ def run_single_preflid(
     provider = RouterBenchBTProvider(
         ctx["theta_task"], ctx["theta_model"],
         rng=random.Random(f"uprep::bt-preflid::{seed}"),
+        probability_floor=float(
+            ctx["config"].get("feedback", {}).get("probability_floor", 0.0)
+        ),
     )
     from preflid import PrefLID
 
