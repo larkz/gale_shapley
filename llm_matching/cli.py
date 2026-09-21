@@ -32,7 +32,7 @@ from llm_matching.runner import DEFAULT_CONFIG, deep_merge, run_experiment
 
 SUBCOMMANDS = (
     "bootstrap", "sensitivity", "diagnostics", "matching-id",
-    "market-analysis", "regret",
+    "market-analysis", "regret", "bandit",
 )
 
 
@@ -217,6 +217,21 @@ def _run_subcommand(subcmd: str, argv: List[str]) -> int:
             f"{matrix.shape[1]} models. Outputs in "
             f"{Path(config['output_dir']) / 'market_analysis'}"
         )
+    elif subcmd == "bandit":
+        from llm_matching.bandit import run_matching_bandit
+
+        seeds = [int(s) for s in args.seed] if args.seed else list(range(10))
+        algorithms = ["p2etg", "preflid"]
+        summary = run_matching_bandit(
+            config, algorithms=algorithms, seeds=seeds,
+        )
+        out = Path(config["output_dir"]) / "bandit"
+        print(
+            f"Matching-bandit study done: {len(summary)} runs. Outputs in {out}"
+        )
+        cols = ["algorithm", "seed", "stopped", "T_stop", "final_exact",
+                "final_regret", "final_cum_regret"]
+        print(summary[[c for c in cols if c in summary.columns]].to_string(index=False))
     elif subcmd == "regret":
         from llm_matching.regret import write_regret_plots
 
