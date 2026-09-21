@@ -448,14 +448,14 @@ def main():
         Ks=[8],
         alphas=[2.0],
         seeds=list(range(10)),
-        max_epochs=20,
+        max_epochs=200,
         adaptive=True,
-        check_every=250,
-        max_samples=20_000,
-        constant=0.01,
-        run_id="001_baseline",
-        baseline="etc_uniform",     # default
-        T0=3000,
+        check_every=500,
+        max_samples=60_000,
+        constant=0.1,
+        run_id="ver5_P2ETG",
+        # baseline="etc_uniform",     # default
+        # T0=3000,
     )
 
     print("\nLoading summaries...")

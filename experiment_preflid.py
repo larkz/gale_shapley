@@ -408,7 +408,7 @@ def main():
         constant=0.01,
         max_iterations=5000,
         horizon=100000,
-        run_id="ver1",
+        run_id="ver2",
     )
 
     print(f"\nDone. Data in {RUNS_DIR.resolve()}/")
