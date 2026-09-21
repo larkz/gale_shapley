@@ -76,6 +76,7 @@ from llm_matching.utilities import (
     median_positive_gap,
     model_utility,
     strictify_utilities,
+    symmetric_strict_matrix,
     task_utility,
 )
 
@@ -198,12 +199,23 @@ def build_context(config: Dict) -> ExperimentContext:
     logger.info("Split sizes:\n%s", sizes.to_string())
 
     # ---- 3. Utilities ----------------------------------------------------
+    pref_mode = str(config.get("preferences", {}).get("mode", "comparative"))
+    if pref_mode not in ("comparative", "symmetric"):
+        raise ValueError(
+            f"preferences.mode must be 'comparative' or 'symmetric', "
+            f"got {pref_mode!r}"
+        )
     task_util: Dict[str, pd.DataFrame] = {}
     model_util: Dict[str, pd.DataFrame] = {}
     for split in ("train", "val", "test"):
         tu = task_utility(aligned.records, splits, split, datasets, models)
         task_util[split] = tu
-        model_util[split] = model_utility(tu)
+        if pref_mode == "symmetric":
+            # mirror mode: both sides rank by the SAME matrix W = U
+            # (model_util is the transpose; strictified jointly below)
+            model_util[split] = tu.T
+        else:
+            model_util[split] = model_utility(tu)
         tu.to_csv(out_dir / f"task_utility_{split}.csv")
         model_util[split].to_csv(out_dir / f"model_utility_{split}.csv")
 
@@ -216,20 +228,41 @@ def build_context(config: Dict) -> ExperimentContext:
     tie_report: Dict[str, dict] = {}
 
     for split in ("train", "val", "test"):
-        tu_s, task_changed, task_groups = strictify_utilities(
-            task_util[split], tie_epsilon, split_seed, agent_kind="task"
-        )
-        mu_s, model_changed, model_groups = strictify_utilities(
-            model_util[split], tie_epsilon, split_seed, agent_kind="model"
-        )
+        if pref_mode == "symmetric":
+            # single shared tie-free matrix; both sides read the SAME
+            # jittered values (mirror property + strictness guaranteed)
+            W, _, task_groups = symmetric_strict_matrix(
+                task_util[split], tie_epsilon, split_seed
+            )
+            tu_s = W.copy()
+            mu_s = W.T.copy()
+            tu_s.index.name = "dataset"
+            tu_s.columns.name = "model"
+            mu_s.index.name = "model"
+            mu_s.columns.name = "dataset"
+            tie_report[split] = {
+                "task_side_changed_entries": int(W.size),
+                "task_side_groups": task_groups,
+                "model_side_changed_entries": 0,
+                "model_side_groups": [],
+                "note": "symmetric mode: shared jittered matrix W; "
+                "model side = W.T (mirror); ties broken jointly",
+            }
+        else:
+            tu_s, task_changed, task_groups = strictify_utilities(
+                task_util[split], tie_epsilon, split_seed, agent_kind="task"
+            )
+            mu_s, model_changed, model_groups = strictify_utilities(
+                model_util[split], tie_epsilon, split_seed, agent_kind="model"
+            )
+            tie_report[split] = {
+                "task_side_changed_entries": task_changed,
+                "task_side_groups": task_groups,
+                "model_side_changed_entries": model_changed,
+                "model_side_groups": model_groups,
+            }
         task_util_strict[split] = tu_s
         model_util_strict[split] = mu_s
-        tie_report[split] = {
-            "task_side_changed_entries": task_changed,
-            "task_side_groups": task_groups,
-            "model_side_changed_entries": model_changed,
-            "model_side_groups": model_groups,
-        }
     with open(out_dir / "tie_report.json", "w") as fh:
         json.dump(tie_report, fh, indent=2, default=str)
 
@@ -248,6 +281,39 @@ def build_context(config: Dict) -> ExperimentContext:
             )
         prefs[split] = p
         oracle[split] = oracle_matching(p)
+
+    # Uniqueness verification for the symmetric (mirror) mode: with a
+    # shared strict matrix, men-proposing GS == women-proposing GS ==
+    # the mutual-best cascade, and this common matching is the ONLY
+    # stable matching. Verified explicitly; a mismatch is a bug.
+    if pref_mode == "symmetric":
+        from gs_lib.gs_tools import GaleShapley
+        from llm_matching.utilities import mutual_best_cascade
+
+        for split in ("train", "val", "test"):
+            h_men = GaleShapley(prefs[split]).find_stable_matching("men")
+            h_women = GaleShapley(prefs[split]).find_stable_matching("women")
+            cascade = mutual_best_cascade(task_util_strict[split])
+            cascade_pairs = frozenset(cascade.items())
+            men_pairs = frozenset(
+                (p.woman.id, p.man.id) for p in h_men.pairs
+            )
+            women_pairs = frozenset(
+                (p.woman.id, p.man.id) for p in h_women.pairs
+            )
+            oracle_pairs = frozenset(
+                (p.woman.id, p.man.id) for p in oracle[split].pairs
+            )
+            if not (men_pairs == women_pairs == cascade_pairs == oracle_pairs):
+                raise AssertionError(
+                    f"symmetric mode uniqueness violated on {split}: "
+                    f"men-GS {sorted(men_pairs)} != women-GS "
+                    f"{sorted(women_pairs)} != cascade {sorted(cascade_pairs)}"
+                )
+        logger.info(
+            "Symmetric mode: stable matching verified UNIQUE on all "
+            "splits (men-GS == women-GS == mutual-best cascade)."
+        )
 
     with open(out_dir / "oracle_preferences_train.json", "w") as fh:
         json.dump(preference_lists_to_dict(prefs_train), fh, indent=2)

@@ -95,6 +95,7 @@ def run_bootstrap(
     models = list(ctx.config["models"])
     tie_epsilon = float(ctx.config["ties"]["epsilon"])
     split_seed = int(ctx.config["split"]["seed"])
+    pref_mode = str(ctx.config.get("preferences", {}).get("mode", "comparative"))
 
     # Per-dataset TRAIN score matrices [n_instances x n_models].
     merged = ctx.aligned.records.merge(
@@ -130,12 +131,16 @@ def run_bootstrap(
             mat = score_matrices[dataset]
             idx = _resample_indices(mat.shape[0], bootstrap_seed, b, dataset)
             task_util_df.loc[dataset] = mat[idx].mean(axis=0)
-        # V_m^(b) from U^(b) (same formula as utilities.model_utility)
-        row_sum = task_util_df.sum(axis=1)
-        other_mean = task_util_df.rsub(row_sum, axis="index") / (
-            len(models) - 1
-        )
-        model_util_df = (task_util_df - other_mean).T
+        if pref_mode == "symmetric":
+            # mirror mode: model side ranks by the SAME resampled U
+            model_util_df = task_util_df.T
+        else:
+            # V_m^(b) from U^(b) (same formula as utilities.model_utility)
+            row_sum = task_util_df.sum(axis=1)
+            other_mean = task_util_df.rsub(row_sum, axis="index") / (
+                len(models) - 1
+            )
+            model_util_df = (task_util_df - other_mean).T
 
         for dataset in datasets:
             for model in models:

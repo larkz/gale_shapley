@@ -190,3 +190,87 @@ def median_positive_gap(utility: pd.DataFrame, tie_epsilon: float) -> float:
     if n % 2 == 1:
         return float(gaps[n // 2])
     return (gaps[n // 2 - 1] + gaps[n // 2]) / 2.0
+
+
+# ============================================================================
+# Symmetric (mirror) preference mode
+# ============================================================================
+
+def symmetric_strict_matrix(
+    task_util: pd.DataFrame,
+    tie_epsilon: float,
+    split_seed: int,
+) -> Tuple[pd.DataFrame, int, List[dict]]:
+    """Tie-free SHARED preference matrix for the mirror mode.
+
+    Both sides rank by the same value W[d, m] = U_d(m) (task d's
+    preference over models and model m's preference over tasks are
+    mirror images of one matrix). Every cell receives a deterministic
+    SHA256 jitter of at most tie_epsilon/8, so:
+
+      * every row AND every column of W is strictly ordered (no ties on
+        either side, even where only a column tie existed);
+      * pairs separated by more than tie_epsilon keep their order
+        (jitter <= eps/8 on each side keeps a gap > 3*eps/4);
+      * the result is fully reproducible and shared by the oracle, BT
+        thetas, and bootstrap.
+
+    With a strictly ordered shared matrix the stable matching is UNIQUE
+    (the global-max pair is a mutual top choice, matched in every
+    stable matching; induct on the remaining submatrix).
+    """
+    W = task_util.copy().astype(float)
+    scale = tie_epsilon / 8.0
+    n_changed = 0
+    tie_report: List[dict] = []
+    for d in task_util.index:
+        for m in task_util.columns:
+            W.loc[d, m] = float(task_util.loc[d, m]) + scale * deterministic_jitter(
+                str(d), str(m), split_seed
+            )
+            n_changed += 1
+    # report exact-tie groups within rows (informational)
+    for d in task_util.index:
+        row = task_util.loc[d]
+        order = sorted(row.index, key=lambda p: row[p])
+        groups: List[List[str]] = []
+        for p in order:
+            if groups and abs(row[p] - row[groups[-1][-1]]) <= tie_epsilon:
+                groups[-1].append(p)
+            else:
+                groups.append([p])
+        for group in groups:
+            if len(group) >= 2:
+                tie_report.append(
+                    {
+                        "agent_kind": "task",
+                        "agent": str(d),
+                        "partners": [str(p) for p in group],
+                        "values": [float(row[p]) for p in group],
+                    }
+                )
+    return W, n_changed, tie_report
+
+
+def mutual_best_cascade(W: pd.DataFrame) -> Dict[str, str]:
+    """The unique stable matching of strictly-mirrored preferences.
+
+    Greedy cascade: repeatedly match the global-max remaining pair
+    (task, model), remove both, continue. Equivalent to (both versions
+    of) Gale-Shapley under mirror preferences; provided as an
+    independent cross-check of the oracle.
+    """
+    remaining_tasks = list(W.index)
+    remaining_models = list(W.columns)
+    result: Dict[str, str] = {}
+    while remaining_tasks:
+        best = None
+        for d in remaining_tasks:
+            for m in remaining_models:
+                if best is None or W.loc[d, m] > W.loc[best[0], best[1]]:
+                    best = (d, m)
+        d, m = best
+        result[d] = m
+        remaining_tasks.remove(d)
+        remaining_models.remove(m)
+    return result

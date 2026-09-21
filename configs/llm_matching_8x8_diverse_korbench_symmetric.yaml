@@ -1,0 +1,56 @@
+routerbench_root: ../LLMRouterBench
+datasets:
+- emorynlp
+- finqa
+- humaneval
+- korbench
+- math500
+- mbpp
+- medqa
+- meld
+models:
+- DeepSeek-R1-0528-Qwen3-8B
+- Fin-R1
+- GLM-Z1-9B-0414
+- Intern-S1-mini
+- Qwen2.5-Coder-7B-Instruct
+- Qwen3-8B
+- gemma-2-9b-it
+- glm-4-9b-chat
+min_aligned_records: 100
+split:
+  train: 0.6
+  val: 0.2
+  test: 0.2
+  seed: 3407
+feedback:
+  mode: bt
+  target_median_win_probability: 0.7
+  replay_gamma: 0.25
+  replay_probability_epsilon: 0.01
+  model_replay_mode: probabilistic
+ties:
+  policy: deterministic_jitter
+  epsilon: 1.0e-06
+p2etg:
+  adaptive: true
+  check_every: 448
+  max_samples: 200000
+  constant: 0.1
+preflid:
+  budget: 100
+  max_iterations: 7143
+  constant: 0.1
+  max_lattice_vertices: 5000
+  min_samples_per_pair: 10
+  min_sample_ratio: 0.5
+matching_id:
+  max_profiles: 200000
+  timeout_seconds: 2.0
+  certify_every: 1
+experiment:
+  seeds: 20
+  random_baseline_seeds: 200
+output_dir: outputs/llm_matching_8x8_diverse_korbench_symmetric
+preferences:
+  mode: symmetric
