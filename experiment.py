@@ -447,13 +447,13 @@ def main():
         Ns=[8],
         Ks=[8],
         alphas=[2.0],
-        seeds=list(range(10)),
+        seeds=list(range(5)),
         max_epochs=200,
         adaptive=True,
-        check_every=500,
-        max_samples=60_000,
-        constant=0.1,
-        run_id="ver5_P2ETG",
+        check_every=10,
+        max_samples=200_000,
+        constant=0.01,
+        run_id="ver6_P2ETG",
         # baseline="etc_uniform",     # default
         # T0=3000,
     )
