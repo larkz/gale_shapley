@@ -30,6 +30,7 @@ recorded for schema compatibility (our first check fires at t=500).
 
 Usage:
     PYTHONHASHSEED=0 python scripts/export_data_share.py \
+        --markets 8x8 3x3 5x5 10x10 \
         [--seeds 0 1 2 ...] [--out ../gale_shapley_llm_routing/gale_shapley_data_share]
 """
 
@@ -123,6 +124,8 @@ def count_stable_matchings(prefs, men, women) -> int:
 def export_run(ctx, seed: int, out_root: Path, params: Dict) -> Dict:
     from p2etg import P2ETG
 
+    run_id = params["run_id"]
+
     provider = RouterBenchBTProvider(
         ctx["theta_task"], ctx["theta_model"],
         rng=random.Random(f"datashare::bt::{seed}"),
@@ -165,7 +168,7 @@ def export_run(ctx, seed: int, out_root: Path, params: Dict) -> Dict:
         cumulative += 1 - correct
         csv_rows.append((tt, ms, disjoint, correct, cumulative))
 
-    run_dir = out_root / f"{RUN_ID}_N{ctx['N']}_K{ctx['K']}_real_seed{seed}"
+    run_dir = out_root / f"{run_id}_N{ctx['N']}_K{ctx['K']}_real_seed{seed}"
     run_dir.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(
         csv_rows, columns=["t", "matching_str", "disjoint", "correct", "regret"]
@@ -179,20 +182,32 @@ def export_run(ctx, seed: int, out_root: Path, params: Dict) -> Dict:
     ok_hat, reason_hat, _ = StabilityVerifier(prefs_hat).is_stable(committed)
 
     config = {
-        "run_id": RUN_ID, "baseline": "p2etg", "T0": 100,
+        "run_id": run_id, "baseline": "p2etg", "T0": 100,
         "N": ctx["N"], "K": ctx["K"], "alpha": ALPHA, "seed": seed,
         "adaptive": params["adaptive"], "check_every": params["check_every"],
         "max_samples": params["max_samples"], "constant": params["constant"],
         # source extras (additive; loaders keyed on the fields above)
-        "market_source": "LLMRouterBench original 8x8 (full data, no split)",
-        "feedback": "BT, eta-calibrated (target 0.70), no floor",
-        "preferences": "comparative (U task-side / V model-side)",
+        "market_source": params.get(
+            "market_source",
+            "LLMRouterBench original 8x8 (full data, no split)",
+        ),
+        "feedback": params.get(
+            "feedback",
+            "BT, eta-calibrated (target 0.70), no floor",
+        ),
+        "preferences": params.get(
+            "preferences",
+            "comparative (U task-side / V model-side)",
+        ),
+        "probability_floor": float(
+            ctx["config"].get("feedback", {}).get("probability_floor", 0.0)
+        ),
     }
     (run_dir / "config.json").write_text(json.dumps(config, indent=2))
 
     summary = {
         "N": ctx["N"], "K": ctx["K"], "alpha": ALPHA, "seed": seed,
-        "run_id": RUN_ID, "baseline": "p2etg", "T0": 100,
+        "run_id": run_id, "baseline": "p2etg", "T0": 100,
         "stopped": stopped, "T_stop": result["T_stop"],
         "n_epochs": len(rounds),
         "correct_at_stop": int(_pairs(committed) == h_star_pairs),
@@ -214,9 +229,44 @@ def export_run(ctx, seed: int, out_root: Path, params: Dict) -> Dict:
     return summary
 
 
+MARKETS = {
+    "8x8": dict(
+        config="configs/llm_matching_8x8.yaml", run_id="llm_P2ETG",
+        check_every=500,
+        market_source="LLMRouterBench original 8x8 (full data, no split)",
+        feedback="BT, eta-calibrated (target 0.70), no floor",
+        preferences="comparative (U task-side / V model-side)",
+    ),
+    "3x3": dict(
+        config="configs/bandit_scaling_3x3.yaml", run_id="llm_P2ETG",
+        check_every=18,
+        market_source="LLMRouterBench scaling market 3x3 (distinct winners, full data)",
+        feedback="BT, eta-calibrated (target 0.70), probability_floor=0.1",
+        preferences="symmetric (mirror; unique stable matching)",
+    ),
+    "5x5": dict(
+        config="configs/bandit_scaling_5x5.yaml", run_id="llm_P2ETG",
+        check_every=100,
+        market_source="LLMRouterBench scaling market 5x5 (distinct winners, full data)",
+        feedback="BT, eta-calibrated (target 0.70), probability_floor=0.1",
+        preferences="symmetric (mirror; unique stable matching)",
+    ),
+    "10x10": dict(
+        config="configs/bandit_scaling_10x10.yaml", run_id="llm_P2ETG",
+        check_every=900,
+        market_source="LLMRouterBench scaling market 10x10 (distinct winners, full data)",
+        feedback="BT, eta-calibrated (target 0.70), probability_floor=0.1",
+        preferences="symmetric (mirror; unique stable matching)",
+    ),
+}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", default="configs/llm_matching_8x8.yaml")
+    parser.add_argument(
+        "--markets", nargs="*", default=["8x8"],
+        help="subset of: " + " ".join(MARKETS),
+    )
     parser.add_argument("--seeds", type=int, nargs="*", default=list(range(10)))
     parser.add_argument(
         "--out",
@@ -228,26 +278,33 @@ def main() -> int:
 
     from llm_matching.runner import DEFAULT_CONFIG, deep_merge
 
-    with open(args.config, "r", encoding="utf-8") as fh:
-        config = deep_merge(DEFAULT_CONFIG, yaml.safe_load(fh) or {})
-    ctx = build_upstream_context(config)
-
-    params = {
-        "adaptive": True, "check_every": 500,
-        "max_samples": 200_000, "constant": 0.1,
-    }
     out_root = Path(args.out)
     out_root.mkdir(parents=True, exist_ok=True)
 
-    for seed in args.seeds:
-        s = export_run(ctx, seed, out_root, params)
-        print(
-            f"[seed {seed}] stopped={s['stopped']} T_stop={s['T_stop']} "
-            f"correct_at_stop={s['correct_at_stop']} "
-            f"final_regret={s['final_regret']} "
-            f"n_stable_matchings={s['n_stable_matchings']}"
-        )
-    print(f"Exported {len(args.seeds)} runs to {out_root}")
+    for market in args.markets:
+        spec = MARKETS[market]
+        with open(spec["config"], "r", encoding="utf-8") as fh:
+            config = deep_merge(DEFAULT_CONFIG, yaml.safe_load(fh) or {})
+        ctx = build_upstream_context(config)
+
+        params = {
+            "run_id": spec["run_id"],
+            "adaptive": True, "check_every": spec["check_every"],
+            "max_samples": 200_000, "constant": 0.1,
+            "market_source": spec["market_source"],
+            "feedback": spec["feedback"],
+            "preferences": spec["preferences"],
+        }
+        print(f"=== market {market} (N={ctx['N']}, K={ctx['K']}) ===")
+        for seed in args.seeds:
+            s = export_run(ctx, seed, out_root, params)
+            print(
+                f"[{market} seed {seed}] stopped={s['stopped']} "
+                f"T_stop={s['T_stop']} correct_at_stop={s['correct_at_stop']} "
+                f"final_regret={s['final_regret']} "
+                f"n_stable_matchings={s['n_stable_matchings']}"
+            )
+    print(f"Exported to {out_root}")
     return 0
 
 
