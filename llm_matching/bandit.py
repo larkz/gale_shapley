@@ -10,7 +10,11 @@ The learner never sees the utilities; it only observes noisy pairwise
 BT feedback. At every algorithm checkpoint the learner's current
 matching M_t is evaluated on the TRUE utilities:
 
-    instantaneous regret  r(t) = W(H*) - W(M_t)
+    instantaneous regret  r(t) = max(0, W(H*) - W(M_t))
+                          (clipped at 0 per round: holding a
+                          welfare-better-than-H* matching earns no
+                          credit, so cumulative regret is
+                          non-decreasing by construction)
     cumulative regret     R(T) = integral_0^T r(t) dt  (trapezoid)
 
 Post-stop semantics: once an algorithm certifies and commits, its
@@ -269,10 +273,13 @@ def run_bandit_seed(
     W = ctx.W
     rows = []
     prev_t, area = 0, 0.0
-    prev_regret = ctx.w_star - _welfare_of(records[0][1], W) if records else 0.0
+    prev_regret = (
+        max(0.0, ctx.w_star - _welfare_of(records[0][1], W))
+        if records else 0.0
+    )
     for t, m in records:
         w = _welfare_of(m, W)
-        r = ctx.w_star - w
+        r = max(0.0, ctx.w_star - w)  # clipped: no credit for beating H*
         dt = t - prev_t
         area += (prev_regret + r) / 2.0 * dt
         rows.append(
@@ -284,7 +291,7 @@ def run_bandit_seed(
         prev_t, prev_regret = t, r
     # freeze after stop (committed matching plays the remaining horizon)
     if stopped and t_stop < budget and rows:
-        r_frozen = ctx.w_star - _welfare_of(committed, W)
+        r_frozen = max(0.0, ctx.w_star - _welfare_of(committed, W))
         dt = budget - t_stop
         area += (prev_regret + r_frozen) / 2.0 * dt
         rows.append(
@@ -404,11 +411,6 @@ def _bandit_plots(ctx, traces, summary_df, algorithms, budget) -> None:
             grid_, np.nanmean(matrix, axis=0), color=color, linewidth=2.4,
             label=f"{algorithm} (mean, n={matrix.shape[0]})",
         )
-    ax.plot(
-        [0, budget], [0, ctx.regret_random * budget],
-        linestyle="--", color="tab:gray", linewidth=1.3, alpha=0.9,
-        label=f"random always (slope {ctx.regret_random:.3f}/t)",
-    )
     ax.set_xlabel("number of pairwise observations (t)")
     ax.set_ylabel("cumulative regret  R(t)")
     ax.set_title(
@@ -456,8 +458,8 @@ def _bandit_report(ctx, summary_df, algorithms) -> None:
         "* setting: online learning, NO train/test split; utilities from "
         "the FULL data; symmetric (mirror) preferences -> UNIQUE stable "
         "matching H* (men-GS == women-GS == cascade, verified)",
-        f"* W(H*) = {ctx.w_star:.4f}; Hungarian = {ctx.w_hungarian:.4f}; "
-        f"random regret = {ctx.regret_random:.4f}/t",
+        f"* W(H*) = {ctx.w_star:.4f}; Hungarian = "
+        f"{ctx.w_hungarian:.4f}",
         f"* BT feedback, eta_task={ctx.eta_task:.4f}, "
         f"eta_model={ctx.eta_model:.4f}",
         "* same estimator (MLE-GS) for both algorithms; only the SAMPLING "
