@@ -65,31 +65,50 @@ class PartitionStructure:
 
 
 def build_partitions_from_cis(
-        partners, theta_hat, ci, counts=None, min_samples_per_cut=10,
-    ):
-        ranked = sorted(partners, key=lambda b: (-theta_hat.get(b, 0.0), str(b)))
-        if not ranked:
-            return []
+    partners: Sequence[Hashable],
+    theta_hat: Dict[Hashable, float],
+    ci: Dict[Tuple[Hashable, Hashable], Tuple[float, float]],
+    counts: Optional[Dict[Tuple[Hashable, Hashable], int]] = None,
+    min_samples_per_cut: int = 10,
+) -> List[List[Hashable]]:
+    """Partition a single agent's partners into blocks using CIs.
 
-        blocks = [[ranked[0]]]
-        for i in range(len(ranked) - 1):
-            b_i, b_j = ranked[i], ranked[i + 1]
-            key = _canonical(b_i, b_j)
+    Method:
+        1. Sort partners by theta_hat descending.
+        2. Walk down the sorted list; at each adjacent pair (b_i, b_{i+1}),
+           look up their CI on the pairwise preference p_hat_{b_i, b_{i+1}}.
+           If the interval excludes 0.5 AND the pair has at least
+           `min_samples_per_cut` samples, they are "cut" apart.
+           Otherwise, they stay in the same block.
 
-            # NEW: refuse to cut unless this pair has enough samples.
-            if counts is not None:
-                n = counts.get(key, 0)
-                if n < min_samples_per_cut:
-                    blocks[-1].append(b_j)
-                    continue
+    The CI dict is keyed by _canonical(b_i, b_j), matching PairCounts.
+    If `counts` is provided, pairs with fewer than `min_samples_per_cut`
+    samples are never used to place a cut, guarding against spurious cuts
+    from small-sample CI noise.
+    """
+    ranked = sorted(partners, key=lambda b: (-theta_hat.get(b, 0.0), str(b)))
+    if not ranked:
+        return []
 
-            lo, hi = ci.get(key, (0.0, 1.0))
-            cut = (lo > 0.5) or (hi < 0.5)
-            if cut:
-                blocks.append([b_j])
-            else:
+    blocks: List[List[Hashable]] = [[ranked[0]]]
+    for i in range(len(ranked) - 1):
+        b_i, b_j = ranked[i], ranked[i + 1]
+        key = _canonical(b_i, b_j)
+
+        # Refuse to cut unless this pair has enough samples.
+        if counts is not None:
+            n = counts.get(key, 0)
+            if n < min_samples_per_cut:
                 blocks[-1].append(b_j)
-        return blocks
+                continue
+
+        lo, hi = ci.get(key, (0.0, 1.0))    # default: unresolved
+        cut = (lo > 0.5) or (hi < 0.5)
+        if cut:
+            blocks.append([b_j])
+        else:
+            blocks[-1].append(b_j)
+    return blocks
 
 
 # ============================================================================
@@ -113,9 +132,6 @@ def enumerate_configurations(
     if total > budget:
         return None
 
-    # For each agent, enumerate all ways to linearly order the within-block
-    # elements. Blocks are ordered by their position (the cut structure
-    # fixes the block order); within a block we permute freely.
     per_agent_orders: Dict[Hashable, List[List[Hashable]]] = {}
     for agent, blocks in structure.partitions.items():
         block_perms = [list(permutations(block)) for block in blocks]
@@ -146,13 +162,10 @@ def lattice_from_configuration(
     """Build the lattice of stable matchings for a fully-resolved config.
 
     Returns a frozenset of Matching objects, or None if the lattice would
-    exceed `max_vertices` (in which case the caller should treat the
-    configuration as out-of-budget).
+    exceed `max_vertices`.
 
     Uses the existing StableMatchingLattice from gs_tools.
     """
-    # Build a PreferenceList. GS is A-side proposing, so the orientation
-    # of each agent's list is already given by the configuration.
     prefs_dict: Dict[Hashable, List[Hashable]] = {}
     for agent, ordered in config.items():
         prefs_dict[agent] = list(ordered)
@@ -178,6 +191,9 @@ class Island:
     lattice_indices: List[int]                 # indices into the input list
     H_star: Matching                           # centroidal matching
     support: int                               # number of lattices sharing H_star
+    support_max: int = 0                       # max support across vertices
+    support_min: int = 0                       # min support across vertices
+    support_mean: float = 0.0                  # mean support across vertices
 
 
 def construct_islands(
@@ -188,7 +204,7 @@ def construct_islands(
     Two lattices are in the same island iff their vertex sets intersect.
     Islands are computed via union-find over lattices. Within each island,
     the centroidal matching H_star is the vertex covered by the most
-    lattices (with ties broken by str).
+    lattices (ties broken by str).
 
     Parameters:
         lattices: list of frozensets of Matching.
@@ -242,10 +258,14 @@ def construct_islands(
             support.keys(),
             key=lambda v: (support[v], str(v)),
         )
+        support_values = list(support.values())
         islands.append(Island(
             lattice_indices=sorted(idxs),
             H_star=H_star,
             support=support[H_star],
+            support_max=max(support_values),
+            support_min=min(support_values),
+            support_mean=sum(support_values) / len(support_values),
         ))
 
     return islands

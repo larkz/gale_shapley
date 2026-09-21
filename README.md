@@ -376,6 +376,6 @@ print(df[df["disjoint"]].head(1))   # first disjoint=True is T_stop
 # Summary
 
 > 
- To use P2ETG, define one function: `observe(agent, b1, b2) -> int`. Wrap it in a `SignalProvider`, pass it to `P2ETG(men, women, provider)`, and call `run_until_stop()`. The result is a committed stable matching, and the environment's only job is to produce binary comparison signals.}
+ To use P2ETG, define one function: `observe(agent, b1, b2) -> int`. Wrap it in a `SignalProvider`, pass it to `P2ETG(men, women, provider)`, and call `run_until_stop()`. The result is a committed stable matching, and the environment's only job is to produce binary comparison signals.
 
 The algorithm is fully decoupled from the signal source. Swap BT for a language model, a human, a live market, or a composition — P2ETG runs unchanged.

@@ -9,17 +9,10 @@ compatible with the current partition structure, builds lattices per
 configuration, and certifies a matching when all lattices share a single
 island.
 
-Key difference from P2ETG:
-    - P2ETG samples all pairs uniformly round-robin.
-    - PrefLID centers each round on a single agent (RRT), who performs a
-      full round-robin against the opposite side.
-    - P2ETG stops when every pairwise CI excludes 0.5.
-    - PrefLID stops when the island count is 1 (or a fallback condition).
-
 Verbose diagnostics:
     Set `verbose=True` in `run_until_stop(...)` to enable per-iteration
-    gate-failure prints and gate-breakdown summaries. The default is
-    silent.
+    gate-failure prints, gate-breakdown summaries, and terminal arm-count
+    dumps. The default is silent.
 """
 
 from __future__ import annotations
@@ -64,19 +57,7 @@ class AgentState:
 # ============================================================================
 
 class PrefLID:
-    """Preference Resolution via Lattice Island Detection.
-
-    Args:
-        men, women: A-side and B-side agents.
-        true_theta_men, true_theta_women: ground-truth BT parameters.
-        rng: random.Random for reproducibility.
-        constant: CI constant for the Hoeffding half-width.
-        budget: computational budget for configuration enumeration (B_Sigma).
-        max_lattice_vertices: cap on lattice size before treating as
-            out-of-budget.
-        min_samples_per_pair: minimum comparisons per pair before island
-            detection is attempted.
-    """
+    """Preference Resolution via Lattice Island Detection."""
 
     def __init__(
         self,
@@ -89,6 +70,7 @@ class PrefLID:
         budget: int = 100,
         max_lattice_vertices: int = 5000,
         min_samples_per_pair: int = 10,
+        min_sample_ratio: float = 0.5,
     ):
         self.men = list(men)
         self.women = list(women)
@@ -99,6 +81,7 @@ class PrefLID:
         self.budget = budget
         self.max_lattice_vertices = max_lattice_vertices
         self.min_samples_per_pair = min_samples_per_pair
+        self.min_sample_ratio = min_sample_ratio
 
         self.agent_states: Dict[Hashable, AgentState] = {}
         for m in self.men:
@@ -110,10 +93,8 @@ class PrefLID:
         self.stopped = False
         self.committed_matching: Optional[Matching] = None
 
-        # Verbose flag for diagnostics (set by run_until_stop).
         self._verbose = False
 
-        # Precompute true BT probabilities for every (center, pair).
         self._true_prob_cache: Dict[Tuple, float] = {}
         if (self.true_theta_men is not None
                 and self.true_theta_women is not None):
@@ -135,7 +116,6 @@ class PrefLID:
     # ------------------------------------------------------------------
 
     def _true_prob(self, agent: Hashable, b1: Hashable, b2: Hashable) -> float:
-        """True BT probability that agent prefers canonical-first over second."""
         if isinstance(agent, Man):
             theta = self.true_theta_men[agent]
         else:
@@ -148,13 +128,11 @@ class PrefLID:
         return t1 / (t1 + t2)
 
     def _sample_comparison(self, agent: Hashable, b1: Hashable, b2: Hashable) -> int:
-        """Sample one Bernoulli draw. Returns 1 if canonical-first won."""
         key = _canonical(b1, b2)
         p = self._true_prob_cache[(agent, key)]
         return 1 if self.rng.random() < p else 0
 
     def observe(self, agent: Hashable, b1: Hashable, b2: Hashable, x: int) -> None:
-        """Record an observation. x=1 means canonical-first won."""
         self.agent_states[agent].counts.record(b1, b2, x)
 
     # ------------------------------------------------------------------
@@ -180,20 +158,10 @@ class PrefLID:
             )
 
     # ------------------------------------------------------------------
-    # RRT: targeted round-robin for a single center agent
+    # RRT
     # ------------------------------------------------------------------
 
     def rrt_round(self, center: Hashable) -> int:
-        """Center agent does a full round-robin against the entire opposite side.
-
-        Prioritizes least-sampled pairs for this center, so coverage
-        converges to uniform without waiting for many rounds.
-
-        If center is A-side, samples (center; b_i, b_j) for every unordered
-        pair {b_i, b_j} of women. Symmetric for a B-side center.
-
-        Returns the number of comparisons drawn this round.
-        """
         if isinstance(center, Man):
             opponents = self.women
         else:
@@ -201,7 +169,6 @@ class PrefLID:
 
         state = self.agent_states[center]
 
-        # Build the list of pairs for this center, with their current counts.
         pairs: List[Tuple[int, Hashable, Hashable]] = []
         for i in range(len(opponents)):
             for j in range(i + 1, len(opponents)):
@@ -209,7 +176,6 @@ class PrefLID:
                 n = state.counts.total.get(key, 0)
                 pairs.append((n, opponents[i], opponents[j]))
 
-        # Least-sampled first, so this round maximizes coverage.
         pairs.sort(key=lambda x: x[0])
 
         n = 0
@@ -225,7 +191,6 @@ class PrefLID:
     # ------------------------------------------------------------------
 
     def current_partition_structure(self) -> PartitionStructure:
-        """Build the partition structure from current CIs."""
         partitions: Dict[Hashable, List[List[Hashable]]] = {}
         for state in self.agent_states.values():
             partitions[state.agent] = build_partitions_from_cis(
@@ -242,7 +207,6 @@ class PrefLID:
     # ------------------------------------------------------------------
 
     def _all_pairs_sampled(self) -> bool:
-        """True iff every (agent, partner-pair) arm has been sampled at least once."""
         for state in self.agent_states.values():
             n_partners = len(state.partners)
             expected = n_partners * (n_partners - 1) // 2
@@ -251,7 +215,6 @@ class PrefLID:
         return True
 
     def _all_pairs_min_samples(self, min_samples: int) -> bool:
-        """True iff every arm has at least `min_samples` comparisons."""
         for state in self.agent_states.values():
             n_partners = len(state.partners)
             expected = n_partners * (n_partners - 1) // 2
@@ -268,6 +231,37 @@ class PrefLID:
                     return False
         return True
 
+    def _all_pairs_sufficiently_sampled(
+        self,
+        min_samples: int,
+        min_ratio: float,
+    ) -> bool:
+        for state in self.agent_states.values():
+            n_partners = len(state.partners)
+            expected = n_partners * (n_partners - 1) // 2
+            if len(state.counts.total) < expected:
+                if self._verbose:
+                    print(f"  [gate fail] {state.agent}: "
+                          f"{len(state.counts.total)}/{expected} arms sampled")
+                return False
+            counts = list(state.counts.total.values())
+            if not counts:
+                return False
+            max_count = max(counts)
+            min_count = min(counts)
+            if max_count < min_samples:
+                if self._verbose:
+                    print(f"  [gate fail] {state.agent}: "
+                          f"max={max_count} < {min_samples}")
+                return False
+            if min_count < min_ratio * max_count:
+                if self._verbose:
+                    print(f"  [gate fail] {state.agent}: "
+                          f"min={min_count} < {min_ratio}*{max_count}="
+                          f"{min_ratio * max_count:.1f}")
+                return False
+        return True
+
     # ------------------------------------------------------------------
     # Lattice construction from a configuration
     # ------------------------------------------------------------------
@@ -276,8 +270,6 @@ class PrefLID:
         self,
         configs: List[Dict[Hashable, List[Hashable]]],
     ) -> Optional[List[frozenset]]:
-        """Build one lattice per configuration. Returns None if any lattice
-        exceeds max_lattice_vertices (treated as out-of-budget)."""
         lattices: List[frozenset] = []
         for config in configs:
             V = lattice_from_configuration(config, self.max_lattice_vertices)
@@ -296,24 +288,13 @@ class PrefLID:
         rounds: Optional[List[Dict]] = None,
         verbose: bool = False,
     ) -> Dict[str, object]:
-        """Run PrefLID until the island count is 1 (or fallback).
-
-        `rounds`, if provided, is a list to which we append a dict per
-        iteration containing (t, n_islands, omega_size, center, H_star_str).
-
-        `verbose`, if True, enables per-iteration diagnostic prints and the
-        gate-breakdown summary at the end of the run.
-        """
         if len(self.men) < 1 or len(self.women) < 2:
             raise ValueError(
                 "PrefLID requires at least 1 A-side and 2 B-side agents."
             )
 
-        # Store verbose flag for use inside _all_pairs_min_samples.
         self._verbose = verbose
 
-        # Seed the entrant set (used only to prioritize which agents get
-        # centered; every agent will eventually be centered).
         U: set = {self.men[0], self.women[0], self.women[1]}
         all_agents = self.men + self.women
 
@@ -323,7 +304,6 @@ class PrefLID:
         last_lattices: Optional[List[frozenset]] = None
         last_omega: Optional[List[Dict]] = None
 
-        # Diagnostic counters — how many iterations were spent at each gate.
         gate_counts = {
             "insufficient_data": 0,
             "over_budget": 0,
@@ -335,30 +315,31 @@ class PrefLID:
         while iteration < max_iterations:
             iteration += 1
 
-            # Pick next center: prioritize agents not yet centered.
             remaining = [a for a in all_agents if a not in U]
             if not remaining:
                 remaining = all_agents
             center = self.rng.choice(remaining)
 
-            # RRT round.
             n_samples = self.rrt_round(center)
 
-            # Admit the center to U immediately. This is decoupled from
-            # the lattice-count gate, which only controls island detection.
             U.add(center)
 
-            # Refresh estimates and partition structure.
             self._refresh_estimates()
 
-            # Gate: no island detection until every pair has enough samples.
-            if not self._all_pairs_min_samples(self.min_samples_per_pair):
+            if not self._all_pairs_sufficiently_sampled(
+                min_samples=self.min_samples_per_pair,
+                min_ratio=self.min_sample_ratio,
+            ):
                 gate_counts["insufficient_data"] += 1
                 if rounds is not None:
                     rounds.append({
                         "t": self.t, "iteration": iteration,
                         "center": str(center), "n_samples": n_samples,
                         "omega_size": None, "n_islands": None,
+                        "n_lattices_largest_island": None,
+                        "support_max": None, "support_min": None,
+                        "support_mean": None,
+                        "H_star": None,
                         "H_star_str": None,
                         "status": "insufficient_data",
                     })
@@ -371,7 +352,6 @@ class PrefLID:
             structure = self.current_partition_structure()
             omega_size = structure.size_of_omega()
 
-            # Try to enumerate configurations within budget.
             configs = enumerate_configurations(structure, budget=self.budget)
 
             if configs is None:
@@ -382,6 +362,10 @@ class PrefLID:
                         "center": str(center), "n_samples": n_samples,
                         "omega_size": omega_size,
                         "n_islands": None,
+                        "n_lattices_largest_island": None,
+                        "support_max": None, "support_min": None,
+                        "support_mean": None,
+                        "H_star": None,
                         "H_star_str": None,
                         "status": "over_budget",
                     })
@@ -391,7 +375,6 @@ class PrefLID:
                           f"refining.")
                 continue
 
-            # Build lattices.
             lattices = self.build_lattices(configs)
             if lattices is None:
                 gate_counts["lattice_too_large"] += 1
@@ -401,6 +384,10 @@ class PrefLID:
                         "center": str(center), "n_samples": n_samples,
                         "omega_size": omega_size,
                         "n_islands": None,
+                        "n_lattices_largest_island": None,
+                        "support_max": None, "support_min": None,
+                        "support_mean": None,
+                        "H_star": None,
                         "H_star_str": None,
                         "status": "lattice_too_large",
                     })
@@ -410,7 +397,6 @@ class PrefLID:
                           f"{self.max_lattice_vertices} vertices.")
                 continue
 
-            # Construct islands.
             islands = construct_islands(lattices)
             gate_counts["ok"] += 1
 
@@ -418,7 +404,6 @@ class PrefLID:
             last_lattices = lattices
             last_omega = configs
 
-            # Record round.
             largest = max(islands, key=lambda isl: len(isl.lattice_indices))
             if rounds is not None:
                 rounds.append({
@@ -426,6 +411,11 @@ class PrefLID:
                     "center": str(center), "n_samples": n_samples,
                     "omega_size": omega_size,
                     "n_islands": len(islands),
+                    "n_lattices_largest_island": len(largest.lattice_indices),
+                    "support_max": largest.support_max,
+                    "support_min": largest.support_min,
+                    "support_mean": largest.support_mean,
+                    "H_star": largest.H_star,
                     "H_star_str": str(largest.H_star),
                     "support": largest.support,
                     "status": "ok",
@@ -435,21 +425,25 @@ class PrefLID:
                       f"|Omega|={omega_size} |islands|={len(islands)} "
                       f"H*_support={largest.support}")
 
-            # Stopping condition.
             if len(islands) == 1:
                 self.stopped = True
                 self.committed_matching = islands[0].H_star
-                # Record the commit explicitly so downstream code can
-                # distinguish "committed" from "still exploring".
                 if rounds is not None:
+                    single = islands[0]
                     rounds.append({
                         "t": self.t, "iteration": iteration,
                         "center": str(center), "n_samples": n_samples,
                         "omega_size": omega_size,
                         "n_islands": 1,
-                        "H_star_str": str(islands[0].H_star),
-                        "support": islands[0].support,
+                        "n_lattices_largest_island": len(single.lattice_indices),
+                        "support_max": single.support_max,
+                        "support_min": single.support_min,
+                        "support_mean": single.support_mean,
+                        "H_star": single.H_star,
+                        "H_star_str": str(single.H_star),
+                        "support": single.support,
                         "status": "committed",
+                        "reason": "certified",
                     })
 
                 if verbose:
@@ -467,17 +461,14 @@ class PrefLID:
                     "islands": islands,
                     "lattices": lattices,
                     "omega": configs,
+                    "reason": "certified",
                     "gate_counts": dict(gate_counts),
                 }
 
-            # Entrant gate: soft signal only.
             if len(lattices) >= fair_share and verbose:
                 print(f"             entrant gate: {len(lattices)} "
                       f">= {fair_share:.1f}.")
 
-        # ------------------------------------------------------------------
-        # Fallback: return the largest island's H_star
-        # ------------------------------------------------------------------
         if last_islands is None:
             self._refresh_estimates()
             fallback = self._current_gs_matching()
@@ -489,6 +480,7 @@ class PrefLID:
                 for k, v in gate_counts.items():
                     print(f"  {k:>20}: {v} iterations")
                 print(f"  Total: {iteration} iterations, t={self.t} samples")
+                self._dump_arm_counts()
 
             return {
                 "stopped": False,
@@ -512,6 +504,7 @@ class PrefLID:
             for k, v in gate_counts.items():
                 print(f"  {k:>20}: {v} iterations")
             print(f"  Total: {iteration} iterations, t={self.t} samples")
+            self._dump_arm_counts()
 
         return {
             "stopped": False,
@@ -531,9 +524,20 @@ class PrefLID:
     # ------------------------------------------------------------------
 
     def _current_gs_matching(self) -> Matching:
-        """GS on the current estimated preferences (A-side proposes)."""
         prefs_dict: Dict[Hashable, List[Hashable]] = {}
         for state in self.agent_states.values():
             prefs_dict[state.agent] = bt_ranking(state.theta)
         prefs = PreferenceList(prefs_dict)
         return GaleShapley(prefs).find_stable_matching("men")
+
+    def _dump_arm_counts(self) -> None:
+        print("\n=== Arm counts at termination ===")
+        for state in self.agent_states.values():
+            arms = list(state.counts.total.items())
+            counts = sorted(n for _, n in arms)
+            max_c = max(counts) if counts else 0
+            min_c = min(counts) if counts else 0
+            ratio = (min_c / max_c) if max_c > 0 else 0.0
+            print(f"  {state.agent}: {len(arms)} arms, "
+                  f"min={min_c}, max={max_c}, ratio={ratio:.2f}, "
+                  f"counts={counts}")
