@@ -89,8 +89,12 @@ def test_bandit_p2etg_seed_produces_regret_curve(tmp_path):
     ctx = build_bandit_context(config)
     rows, summary = run_bandit_seed(ctx, "p2etg", 0, budget=600)
     assert len(rows) >= 1
-    # cumulative regret non-decreasing in expectation: starts finite
-    assert rows["cum_regret"].iloc[-1] >= rows["cum_regret"].iloc[0]
+    # instantaneous regret is bounded by the welfare range; cumulative
+    # regret may DECREASE when the learner holds a welfare-better
+    # matching than the stable H* (cascade != welfare-optimal)
+    assert rows["regret"].abs().max() <= 3.0
+    assert rows["cum_regret"].notna().all()
+    assert rows["t"].is_monotonic_increasing
     assert "final_exact" in summary
     assert summary["T_stop"] <= 600
 
