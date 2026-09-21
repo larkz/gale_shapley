@@ -1,9 +1,0 @@
-run,n,stopped,cert_correct,false_cert,T_stop_med_stopped,exact_final,resolved,welfare,stable
-p2etg/bt@10K,20,0,0,0,NaN,13,0.87,2.6902,13
-p2etg/replay@10K,20,0,0,0,NaN,15,0.484,2.7011,15
-matching_id/bt@10K,20,4,3,1,6264.0,16,0.861,2.7066,16
-matching_id/replay@10K,20,0,0,0,NaN,12,0.481,2.6781,12
-preflid/bt@10K,20,0,0,0,NaN,14,0.571,2.6957,14
-preflid/replay@10K,20,0,0,0,NaN,4,0.219,2.4868,4
-preflid/bt@10K-ALIGNED,20,11,7,4,4368.0,14,0.853,2.6957,14
-preflid/replay@10K-ALIGNED,20,0,0,0,NaN,13,0.469,2.6869,13
