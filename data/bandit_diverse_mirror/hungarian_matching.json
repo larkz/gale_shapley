@@ -1,0 +1,10 @@
+{
+  "meld": "glm-4-9b-chat",
+  "medqa": "DeepSeek-R1-0528-Qwen3-8B",
+  "humaneval": "Qwen2.5-Coder-7B-Instruct",
+  "math500": "GLM-Z1-9B-0414",
+  "korbench": "Intern-S1-mini",
+  "emorynlp": "gemma-2-9b-it",
+  "mbpp": "Fin-R1",
+  "finqa": "Qwen3-8B"
+}

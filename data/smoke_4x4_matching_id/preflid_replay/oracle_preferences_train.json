@@ -1,0 +1,50 @@
+{
+  "DeepSeek-R1-0528-Qwen3-8B": [
+    "livecodebench",
+    "math500",
+    "medqa",
+    "finqa"
+  ],
+  "Fin-R1": [
+    "math500",
+    "finqa",
+    "medqa",
+    "livecodebench"
+  ],
+  "Llama-3.1-8B-UltraMedical": [
+    "medqa",
+    "finqa",
+    "livecodebench",
+    "math500"
+  ],
+  "Qwen2.5-Coder-7B-Instruct": [
+    "livecodebench",
+    "finqa",
+    "math500",
+    "medqa"
+  ],
+  "finqa": [
+    "DeepSeek-R1-0528-Qwen3-8B",
+    "Fin-R1",
+    "Qwen2.5-Coder-7B-Instruct",
+    "Llama-3.1-8B-UltraMedical"
+  ],
+  "livecodebench": [
+    "DeepSeek-R1-0528-Qwen3-8B",
+    "Qwen2.5-Coder-7B-Instruct",
+    "Llama-3.1-8B-UltraMedical",
+    "Fin-R1"
+  ],
+  "math500": [
+    "DeepSeek-R1-0528-Qwen3-8B",
+    "Fin-R1",
+    "Qwen2.5-Coder-7B-Instruct",
+    "Llama-3.1-8B-UltraMedical"
+  ],
+  "medqa": [
+    "DeepSeek-R1-0528-Qwen3-8B",
+    "Llama-3.1-8B-UltraMedical",
+    "Fin-R1",
+    "Qwen2.5-Coder-7B-Instruct"
+  ]
+}

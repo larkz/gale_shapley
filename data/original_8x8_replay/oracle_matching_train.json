@@ -1,0 +1,10 @@
+{
+  "mmlupro": "Llama-3.1-8B-Instruct",
+  "livecodebench": "Qwen3-8B",
+  "medqa": "Llama-3.1-8B-UltraMedical",
+  "meld": "gemma-2-9b-it",
+  "math500": "DeepSeek-R1-0528-Qwen3-8B",
+  "bbh": "NVIDIA-Nemotron-Nano-9B-v2",
+  "finqa": "Fin-R1",
+  "korbench": "Qwen2.5-Coder-7B-Instruct"
+}

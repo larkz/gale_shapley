@@ -1,0 +1,12 @@
+{
+  "N": 8,
+  "K": 8,
+  "seed": 1,
+  "preflid_stopped": true,
+  "preflid_T_stop": 74340,
+  "preflid_correct": 0,
+  "horizon": 74540,
+  "final_regret": 72244,
+  "constant": 0.005,
+  "budget": 300000
+}

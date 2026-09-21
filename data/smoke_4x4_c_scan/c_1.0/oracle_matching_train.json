@@ -1,0 +1,6 @@
+{
+  "finqa": "Qwen2.5-Coder-7B-Instruct",
+  "livecodebench": "DeepSeek-R1-0528-Qwen3-8B",
+  "math500": "Fin-R1",
+  "medqa": "Llama-3.1-8B-UltraMedical"
+}

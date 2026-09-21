@@ -1,0 +1,6 @@
+N,K,seed,preflid_stopped,preflid_T_stop,preflid_correct,horizon,final_regret,constant,budget
+8,8,0,True,36820,0,37020,11596,0.005,300000
+8,8,1,True,74340,0,74540,72244,0.005,300000
+8,8,2,True,36876,0,37076,37076,0.005,300000
+8,8,3,True,82012,1,82212,15372,0.005,300000
+8,8,4,True,8092,0,8292,8292,0.005,300000

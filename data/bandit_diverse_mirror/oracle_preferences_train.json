@@ -1,0 +1,162 @@
+{
+  "DeepSeek-R1-0528-Qwen3-8B": [
+    "math500",
+    "medqa",
+    "finqa",
+    "korbench",
+    "meld",
+    "emorynlp",
+    "mbpp",
+    "humaneval"
+  ],
+  "Fin-R1": [
+    "math500",
+    "humaneval",
+    "finqa",
+    "mbpp",
+    "medqa",
+    "meld",
+    "emorynlp",
+    "korbench"
+  ],
+  "GLM-Z1-9B-0414": [
+    "math500",
+    "medqa",
+    "finqa",
+    "mbpp",
+    "humaneval",
+    "korbench",
+    "meld",
+    "emorynlp"
+  ],
+  "Intern-S1-mini": [
+    "math500",
+    "finqa",
+    "medqa",
+    "korbench",
+    "meld",
+    "humaneval",
+    "mbpp",
+    "emorynlp"
+  ],
+  "Qwen2.5-Coder-7B-Instruct": [
+    "humaneval",
+    "mbpp",
+    "math500",
+    "finqa",
+    "meld",
+    "medqa",
+    "emorynlp",
+    "korbench"
+  ],
+  "Qwen3-8B": [
+    "math500",
+    "medqa",
+    "finqa",
+    "humaneval",
+    "mbpp",
+    "meld",
+    "korbench",
+    "emorynlp"
+  ],
+  "emorynlp": [
+    "Qwen3-8B",
+    "gemma-2-9b-it",
+    "glm-4-9b-chat",
+    "DeepSeek-R1-0528-Qwen3-8B",
+    "Fin-R1",
+    "Qwen2.5-Coder-7B-Instruct",
+    "Intern-S1-mini",
+    "GLM-Z1-9B-0414"
+  ],
+  "finqa": [
+    "Qwen3-8B",
+    "DeepSeek-R1-0528-Qwen3-8B",
+    "Intern-S1-mini",
+    "Fin-R1",
+    "GLM-Z1-9B-0414",
+    "Qwen2.5-Coder-7B-Instruct",
+    "gemma-2-9b-it",
+    "glm-4-9b-chat"
+  ],
+  "gemma-2-9b-it": [
+    "finqa",
+    "medqa",
+    "mbpp",
+    "humaneval",
+    "meld",
+    "math500",
+    "emorynlp",
+    "korbench"
+  ],
+  "glm-4-9b-chat": [
+    "humaneval",
+    "mbpp",
+    "medqa",
+    "finqa",
+    "meld",
+    "math500",
+    "emorynlp",
+    "korbench"
+  ],
+  "humaneval": [
+    "Qwen2.5-Coder-7B-Instruct",
+    "glm-4-9b-chat",
+    "Fin-R1",
+    "Qwen3-8B",
+    "gemma-2-9b-it",
+    "GLM-Z1-9B-0414",
+    "Intern-S1-mini",
+    "DeepSeek-R1-0528-Qwen3-8B"
+  ],
+  "korbench": [
+    "Intern-S1-mini",
+    "DeepSeek-R1-0528-Qwen3-8B",
+    "GLM-Z1-9B-0414",
+    "Qwen3-8B",
+    "glm-4-9b-chat",
+    "Qwen2.5-Coder-7B-Instruct",
+    "gemma-2-9b-it",
+    "Fin-R1"
+  ],
+  "math500": [
+    "GLM-Z1-9B-0414",
+    "DeepSeek-R1-0528-Qwen3-8B",
+    "Qwen3-8B",
+    "Intern-S1-mini",
+    "Fin-R1",
+    "Qwen2.5-Coder-7B-Instruct",
+    "glm-4-9b-chat",
+    "gemma-2-9b-it"
+  ],
+  "mbpp": [
+    "Qwen2.5-Coder-7B-Instruct",
+    "Fin-R1",
+    "GLM-Z1-9B-0414",
+    "glm-4-9b-chat",
+    "gemma-2-9b-it",
+    "Qwen3-8B",
+    "Intern-S1-mini",
+    "DeepSeek-R1-0528-Qwen3-8B"
+  ],
+  "medqa": [
+    "DeepSeek-R1-0528-Qwen3-8B",
+    "Qwen3-8B",
+    "GLM-Z1-9B-0414",
+    "Intern-S1-mini",
+    "gemma-2-9b-it",
+    "Fin-R1",
+    "glm-4-9b-chat",
+    "Qwen2.5-Coder-7B-Instruct"
+  ],
+  "meld": [
+    "glm-4-9b-chat",
+    "Qwen3-8B",
+    "gemma-2-9b-it",
+    "Qwen2.5-Coder-7B-Instruct",
+    "DeepSeek-R1-0528-Qwen3-8B",
+    "Fin-R1",
+    "Intern-S1-mini",
+    "GLM-Z1-9B-0414"
+  ]
+}

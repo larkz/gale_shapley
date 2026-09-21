@@ -1,0 +1,20 @@
+{
+  "train": {
+    "task_side_changed_entries": 0,
+    "task_side_groups": [],
+    "model_side_changed_entries": 0,
+    "model_side_groups": []
+  },
+  "val": {
+    "task_side_changed_entries": 0,
+    "task_side_groups": [],
+    "model_side_changed_entries": 0,
+    "model_side_groups": []
+  },
+  "test": {
+    "task_side_changed_entries": 0,
+    "task_side_groups": [],
+    "model_side_changed_entries": 0,
+    "model_side_groups": []
+  }
+}

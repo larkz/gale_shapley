@@ -1,0 +1,196 @@
+{
+  "train": {
+    "task_side_changed_entries": 64,
+    "task_side_groups": [
+      {
+        "agent_kind": "task",
+        "agent": "emorynlp",
+        "partners": [
+          "DeepSeek-R1-0528-Qwen3-8B",
+          "glm-4-9b-chat"
+        ],
+        "values": [
+          0.3684210526315789,
+          0.3684210526315789
+        ]
+      }
+    ],
+    "model_side_changed_entries": 0,
+    "model_side_groups": [],
+    "note": "symmetric mode: shared jittered matrix W; model side = W.T (mirror); ties broken jointly"
+  },
+  "val": {
+    "task_side_changed_entries": 64,
+    "task_side_groups": [
+      {
+        "agent_kind": "task",
+        "agent": "emorynlp",
+        "partners": [
+          "Qwen2.5-Coder-7B-Instruct",
+          "gemma-2-9b-it"
+        ],
+        "values": [
+          0.45323741007194246,
+          0.45323741007194246
+        ]
+      },
+      {
+        "agent_kind": "task",
+        "agent": "humaneval",
+        "partners": [
+          "Qwen2.5-Coder-7B-Instruct",
+          "glm-4-9b-chat"
+        ],
+        "values": [
+          0.6666666666666666,
+          0.6666666666666666
+        ]
+      },
+      {
+        "agent_kind": "task",
+        "agent": "korbench",
+        "partners": [
+          "Fin-R1",
+          "gemma-2-9b-it"
+        ],
+        "values": [
+          0.364,
+          0.364
+        ]
+      },
+      {
+        "agent_kind": "task",
+        "agent": "math500",
+        "partners": [
+          "DeepSeek-R1-0528-Qwen3-8B",
+          "Qwen3-8B"
+        ],
+        "values": [
+          0.95,
+          0.95
+        ]
+      },
+      {
+        "agent_kind": "task",
+        "agent": "mbpp",
+        "partners": [
+          "gemma-2-9b-it",
+          "glm-4-9b-chat"
+        ],
+        "values": [
+          0.6512820512820513,
+          0.6512820512820513
+        ]
+      },
+      {
+        "agent_kind": "task",
+        "agent": "meld",
+        "partners": [
+          "Fin-R1",
+          "gemma-2-9b-it"
+        ],
+        "values": [
+          0.4796747967479675,
+          0.4796747967479675
+        ]
+      }
+    ],
+    "model_side_changed_entries": 0,
+    "model_side_groups": [],
+    "note": "symmetric mode: shared jittered matrix W; model side = W.T (mirror); ties broken jointly"
+  },
+  "test": {
+    "task_side_changed_entries": 64,
+    "task_side_groups": [
+      {
+        "agent_kind": "task",
+        "agent": "emorynlp",
+        "partners": [
+          "Fin-R1",
+          "GLM-Z1-9B-0414"
+        ],
+        "values": [
+          0.32142857142857145,
+          0.32142857142857145
+        ]
+      },
+      {
+        "agent_kind": "task",
+        "agent": "emorynlp",
+        "partners": [
+          "DeepSeek-R1-0528-Qwen3-8B",
+          "Intern-S1-mini"
+        ],
+        "values": [
+          0.39285714285714285,
+          0.39285714285714285
+        ]
+      },
+      {
+        "agent_kind": "task",
+        "agent": "finqa",
+        "partners": [
+          "GLM-Z1-9B-0414",
+          "Intern-S1-mini"
+        ],
+        "values": [
+          0.6608695652173913,
+          0.6608695652173913
+        ]
+      },
+      {
+        "agent_kind": "task",
+        "agent": "humaneval",
+        "partners": [
+          "GLM-Z1-9B-0414",
+          "Qwen3-8B",
+          "gemma-2-9b-it"
+        ],
+        "values": [
+          0.6363636363636364,
+          0.6363636363636364,
+          0.6363636363636364
+        ]
+      },
+      {
+        "agent_kind": "task",
+        "agent": "math500",
+        "partners": [
+          "DeepSeek-R1-0528-Qwen3-8B",
+          "GLM-Z1-9B-0414"
+        ],
+        "values": [
+          0.92,
+          0.92
+        ]
+      },
+      {
+        "agent_kind": "task",
+        "agent": "medqa",
+        "partners": [
+          "Fin-R1",
+          "Intern-S1-mini"
+        ],
+        "values": [
+          0.6614173228346457,
+          0.6614173228346457
+        ]
+      },
+      {
+        "agent_kind": "task",
+        "agent": "meld",
+        "partners": [
+          "Fin-R1",
+          "Qwen2.5-Coder-7B-Instruct"
+        ],
+        "values": [
+          0.5020242914979757,
+          0.5020242914979757
+        ]
+      }
+    ],
+    "model_side_changed_entries": 0,
+    "model_side_groups": [],
+    "note": "symmetric mode: shared jittered matrix W; model side = W.T (mirror); ties broken jointly"
+  }
+}

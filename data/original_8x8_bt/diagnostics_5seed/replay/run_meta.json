@@ -1,0 +1,13 @@
+{
+  "algorithm": "p2etg",
+  "feedback_mode": "replay",
+  "seeds": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "n_seeds": 5,
+  "n_stopped": 0
+}
