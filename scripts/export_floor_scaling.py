@@ -193,7 +193,7 @@ def _run_preflid(ctx, seed: int, out_root: Path,
                                                   index=False)
     (run_dir / "config.json").write_text(json.dumps({
         "run_id": "floor15_PrefLID", "N": n, "K": n, "alpha": None,
-        "seed": seed, "budget": BUDGET, "constant": CONSTANT,
+        "seed": seed, "budget": BUDGET, "constant": preflid_constant,
         "center_policy": "round_robin", "max_iterations": max_iter,
         "horizon": MAX_SAMPLES,
         "market_source": f"LLMRouterBench greedy distinct-winner "
