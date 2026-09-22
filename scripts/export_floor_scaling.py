@@ -67,7 +67,12 @@ def _market_config(n: int) -> Dict:
 
     from llm_matching.runner import DEFAULT_CONFIG, deep_merge
 
-    with open(f"configs/bandit_scaling_{n}x{n}.yaml") as fh:
+    if n == 8:
+        # the diverse korbench 8x8 market (the flagship real market)
+        base = "configs/llm_matching_8x8_diverse_korbench_symmetric.yaml"
+    else:
+        base = f"configs/bandit_scaling_{n}x{n}.yaml"
+    with open(base) as fh:
         config = deep_merge(DEFAULT_CONFIG, yaml.safe_load(fh) or {})
     config["preferences"] = {"mode": "symmetric"}  # mirror -> unique H*
     config["feedback"]["target_median_win_probability"] = TARGET
@@ -229,7 +234,7 @@ def _pairs_of(ctx) -> frozenset:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--sizes", type=int, nargs="*", default=[3, 5, 10])
+    parser.add_argument("--sizes", type=int, nargs="*", default=[3, 5, 8, 10])
     parser.add_argument("--which", choices=["p2etg", "preflid", "both"],
                         default="both")
     parser.add_argument("--preflid-constant", type=float, default=CONSTANT,
