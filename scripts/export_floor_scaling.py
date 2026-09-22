@@ -150,7 +150,8 @@ def _run_p2etg(ctx, seed: int, out_root: Path) -> Dict:
     return summary
 
 
-def _run_preflid(ctx, seed: int, out_root: Path) -> Dict:
+def _run_preflid(ctx, seed: int, out_root: Path,
+                 preflid_constant: float = CONSTANT) -> Dict:
     from preflid import PrefLID
 
     n = ctx["N"]
@@ -161,7 +162,7 @@ def _run_preflid(ctx, seed: int, out_root: Path) -> Dict:
     )
     learner = PrefLID(
         men=ctx["men"], women=ctx["women"], provider=provider,
-        rng=random.Random(seed), constant=CONSTANT, budget=BUDGET,
+        rng=random.Random(seed), constant=preflid_constant, budget=BUDGET,
         center_policy="round_robin", min_samples_per_pair=10,
         min_sample_ratio=0.5,
     )
@@ -203,7 +204,8 @@ def _run_preflid(ctx, seed: int, out_root: Path) -> Dict:
     }, indent=2))
     summary = {
         "N": n, "K": n, "alpha": None, "seed": seed,
-        "budget": BUDGET, "constant": CONSTANT, "horizon": MAX_SAMPLES,
+        "budget": BUDGET, "constant": preflid_constant,
+        "horizon": MAX_SAMPLES,
         "preflid_stopped": pl_stopped,
         "preflid_T_stop": pl_t_stop,
         "preflid_iterations": pl.get("iterations"),
@@ -230,6 +232,10 @@ def main() -> int:
     parser.add_argument("--sizes", type=int, nargs="*", default=[3, 5, 10])
     parser.add_argument("--which", choices=["p2etg", "preflid", "both"],
                         default="both")
+    parser.add_argument("--preflid-constant", type=float, default=CONSTANT,
+                        help="CI constant for the PrefLID series "
+                             "(0.1 default; 0.3 needed for all-correct "
+                             "certification at 5x5)")
     parser.add_argument("--out",
                         default="../gale_shapley_llm_routing/"
                                 "gale_shapley_data_share")
@@ -251,7 +257,8 @@ def main() -> int:
                       f"regret={s['final_regret']}")
         if args.which in ("preflid", "both"):
             for seed in range(10):
-                s = _run_preflid(ctx, seed, out_root)
+                s = _run_preflid(ctx, seed, out_root,
+                                 preflid_constant=args.preflid_constant)
                 print(f"[{n}x{n} floor15 PrefLID s{seed}] "
                       f"stopped={s['preflid_stopped']} "
                       f"T_stop={s['preflid_T_stop']} "
