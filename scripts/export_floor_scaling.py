@@ -37,7 +37,7 @@ import json
 import random
 import sys
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import pandas as pd
 
@@ -62,12 +62,15 @@ MAX_SAMPLES = 200_000
 POST_STOP_TAIL = 200
 
 
-def _market_config(n: int) -> Dict:
+def _market_config(n: int, config_path: Optional[str] = None) -> Dict:
+    """n=3/5/8/10 -> the square series; config_path -> any market (rect)."""
     import yaml
 
     from llm_matching.runner import DEFAULT_CONFIG, deep_merge
 
-    if n == 8:
+    if config_path is not None:
+        base = config_path
+    elif n == 8:
         # the diverse korbench 8x8 market (the flagship real market)
         base = "configs/llm_matching_8x8_diverse_korbench_symmetric.yaml"
     else:
@@ -76,18 +79,23 @@ def _market_config(n: int) -> Dict:
         config = deep_merge(DEFAULT_CONFIG, yaml.safe_load(fh) or {})
     config["preferences"] = {"mode": "symmetric"}  # mirror -> unique H*
     config["feedback"]["target_median_win_probability"] = TARGET
-    config["feedback"]["probability_floor"] = FLOOR
+    if config_path is None:
+        config["feedback"]["probability_floor"] = FLOOR
+    # (rect configs carry their own floor — 0.15 or 0.20)
     return config
 
 
-def _run_p2etg(ctx, seed: int, out_root: Path) -> Dict:
+def _run_p2etg(ctx, seed: int, out_root: Path,
+               market_name: Optional[str] = None,
+               horizon: int = MAX_SAMPLES) -> Dict:
     from p2etg import P2ETG
 
-    n = ctx["N"]
+    n_m, n_w = len(ctx["men"]), len(ctx["women"])
+    floor = ctx["config"]["feedback"].get("probability_floor", FLOOR)
     provider = RouterBenchBTProvider(
         ctx["theta_task"], ctx["theta_model"],
         rng=random.Random(f"floor15::bt-p2etg::{seed}"),
-        probability_floor=FLOOR,
+        probability_floor=floor,
     )
     learner = P2ETG(
         men=ctx["men"], women=ctx["women"], provider=provider,
@@ -100,9 +108,9 @@ def _run_p2etg(ctx, seed: int, out_root: Path) -> Dict:
             t, matching, disjoint = item
             records.append((t, matching))
 
-    check_every = 2 * n * (n * (n - 1) // 2)  # one pass over all arms
+    check_every = (n_m * (n_m - 1) // 2) + (n_w * (n_w - 1) // 2)  # one pass
     result = learner.run_until_stop(
-        adaptive=True, check_every=check_every, max_samples=MAX_SAMPLES,
+        adaptive=True, check_every=check_every, max_samples=horizon,
         verbose=False, rounds=_Rec(),
     )
     stopped = bool(result["stopped"])
@@ -116,26 +124,28 @@ def _run_p2etg(ctx, seed: int, out_root: Path) -> Dict:
     ok_hat, reason_hat, _ = StabilityVerifier(prefs_hat).is_stable(committed)
 
     bt = simplex_thetas(ctx["theta_task"], ctx["theta_model"])
-    run_dir = out_root / f"floor15_P2ETG_N{n}_K{n}_real_seed{seed}"
+    label = market_name or f"floor15_P2ETG_N{n_w}_K{n_m}_real"
+    run_dir = out_root / f"{label}_seed{seed}"
     run_dir.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(rows, columns=["t", "matching_str", "disjoint", "correct",
                                 "regret"]).to_csv(run_dir / "rounds.csv",
                                                   index=False)
     (run_dir / "bt_params.json").write_text(json.dumps(bt, indent=2))
     (run_dir / "config.json").write_text(json.dumps({
-        "run_id": "floor15_P2ETG", "baseline": "p2etg", "T0": 100,
-        "N": n, "K": n, "alpha": None, "seed": seed,
+        "run_id": label.rsplit("_seed", 1)[0], "baseline": "p2etg",
+        "T0": 100, "N": n_w, "K": n_m, "alpha": None, "seed": seed,
         "adaptive": True, "check_every": check_every,
-        "max_samples": MAX_SAMPLES, "constant": CONSTANT,
-        "market_source": f"LLMRouterBench greedy distinct-winner "
-                         f"scaling market {n}x{n} (full data, no split)",
+        "max_samples": horizon, "constant": CONSTANT,
+        "market_source": f"LLMRouterBench real market {n_w}x{n_m} "
+                         f"(full data, no split)",
         "preferences": "symmetric (mirror) — unique stable matching",
         "feedback": f"BT, eta-calibrated (target {TARGET}), "
-                    f"probability_floor {FLOOR}",
+                    f"probability_floor {floor}",
     }, indent=2))
     summary = {
-        "N": n, "K": n, "alpha": None, "seed": seed,
-        "run_id": "floor15_P2ETG", "baseline": "p2etg", "T0": 100,
+        "N": n_w, "K": n_m, "alpha": None, "seed": seed,
+        "run_id": label.rsplit("_seed", 1)[0], "baseline": "p2etg",
+        "T0": 100,
         "stopped": stopped, "T_stop": result["T_stop"],
         "n_epochs": len(records),
         "correct_at_stop": int(_pairs(committed) == h_star_pairs),
@@ -148,7 +158,8 @@ def _run_p2etg(ctx, seed: int, out_root: Path) -> Dict:
         "constant": CONSTANT,
         "min_bt_gap": min_bt_gap(bt),
         "n_stable_matchings": (count_stable_matchings(
-            ctx["prefs"], ctx["men"], ctx["women"]) if n <= 5 else 1),
+            ctx["prefs"], ctx["men"], ctx["women"])
+            if n_w == n_m and n_w <= 5 else None),
     }
     (run_dir / "summary.json").write_text(json.dumps(summary, indent=2,
                                                      default=str))
@@ -156,18 +167,26 @@ def _run_p2etg(ctx, seed: int, out_root: Path) -> Dict:
 
 
 def _run_preflid(ctx, seed: int, out_root: Path,
-                 preflid_constant: float = CONSTANT) -> Dict:
+                 preflid_constant: float = CONSTANT,
+                 market_name: Optional[str] = None,
+                 horizon: int = MAX_SAMPLES) -> Dict:
     from preflid import PrefLID
 
-    n = ctx["N"]
+    n_m, n_w = len(ctx["men"]), len(ctx["women"])
+    floor = ctx["config"]["feedback"].get("probability_floor", FLOOR)
+    # square series: always use the series budget (rect configs carry
+    # their own); small markets never bind it anyway
+    is_rect = market_name is not None
+    budget = (ctx["config"].get("preflid", {}).get("budget")
+              if is_rect else BUDGET)
     provider = RouterBenchBTProvider(
         ctx["theta_task"], ctx["theta_model"],
         rng=random.Random(f"floor15::bt-preflid::{seed}"),
-        probability_floor=FLOOR,
+        probability_floor=floor,
     )
     learner = PrefLID(
         men=ctx["men"], women=ctx["women"], provider=provider,
-        rng=random.Random(seed), constant=preflid_constant, budget=BUDGET,
+        rng=random.Random(seed), constant=preflid_constant, budget=budget,
         center_policy="round_robin", min_samples_per_pair=10,
         min_sample_ratio=0.5,
     )
@@ -181,36 +200,38 @@ def _run_preflid(ctx, seed: int, out_root: Path,
         return n_samples
 
     learner.rrt_round = rrt_round_with_record
-    max_iter = MAX_SAMPLES // (n * (n - 1) // 2)
+    max_iter = horizon // max(n_m * (n_m - 1) // 2, n_w * (n_w - 1) // 2)
     pl = learner.run_until_stop(max_iterations=max_iter, verbose=False)
     pl_stopped = bool(pl["stopped"])
     pl_committed = pl["matching"]
     pl_t_stop = int(pl["T_stop"])
 
     h_star_pairs = _pairs_of(ctx)
-    t_end = MAX_SAMPLES if MAX_SAMPLES > pl_t_stop else pl_t_stop
+    t_end = horizon if horizon > pl_t_stop else pl_t_stop
     rows = _dense_rows(records, pl_committed, pl_stopped, h_star_pairs, t_end)
 
-    run_dir = out_root / f"floor15_PrefLID_N{n}_K{n}_real_seed{seed}"
+    label = market_name or f"floor15_PrefLID_N{n_w}_K{n_m}_real"
+    run_dir = out_root / f"{label}_seed{seed}"
     run_dir.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(rows, columns=["t", "matching_str", "disjoint", "correct",
                                 "regret"]).to_csv(run_dir / "rounds.csv",
                                                   index=False)
     (run_dir / "config.json").write_text(json.dumps({
-        "run_id": "floor15_PrefLID", "N": n, "K": n, "alpha": None,
-        "seed": seed, "budget": BUDGET, "constant": preflid_constant,
+        "run_id": label.rsplit("_seed", 1)[0], "N": n_w, "K": n_m,
+        "alpha": None, "seed": seed, "budget": budget,
+        "constant": preflid_constant,
         "center_policy": "round_robin", "max_iterations": max_iter,
-        "horizon": MAX_SAMPLES,
-        "market_source": f"LLMRouterBench greedy distinct-winner "
-                         f"scaling market {n}x{n} (full data, no split)",
+        "horizon": horizon,
+        "market_source": f"LLMRouterBench real market {n_w}x{n_m} "
+                         f"(full data, no split)",
         "preferences": "symmetric (mirror) — unique stable matching",
         "feedback": f"BT, eta-calibrated (target {TARGET}), "
-                    f"probability_floor {FLOOR}",
+                    f"probability_floor {floor}",
     }, indent=2))
     summary = {
-        "N": n, "K": n, "alpha": None, "seed": seed,
-        "budget": BUDGET, "constant": preflid_constant,
-        "horizon": MAX_SAMPLES,
+        "N": n_w, "K": n_m, "alpha": None, "seed": seed,
+        "budget": budget, "constant": preflid_constant,
+        "horizon": horizon,
         "preflid_stopped": pl_stopped,
         "preflid_T_stop": pl_t_stop,
         "preflid_iterations": pl.get("iterations"),
@@ -220,8 +241,8 @@ def _run_preflid(ctx, seed: int, out_root: Path,
             StabilityVerifier(ctx["prefs"]).is_stable(pl_committed)[0]
         ),
         "final_regret": rows[-1][4] if rows else None,
-        "market_source": f"LLMRouterBench real {n}x{n} scaling market "
-                         f"(mirror, floor {FLOOR}, target {TARGET})",
+        "market_source": f"LLMRouterBench real {n_w}x{n_m} market "
+                         f"(mirror, floor {floor}, target {TARGET})",
     }
     (run_dir / "summary.json").write_text(json.dumps(summary, indent=2,
                                                      default=str))
@@ -235,6 +256,12 @@ def _pairs_of(ctx) -> frozenset:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sizes", type=int, nargs="*", default=[3, 5, 8, 10])
+    parser.add_argument("--rect", nargs="*", default=None,
+                        help="rectangular-market config paths (e.g. "
+                             "configs/rect_3x8.yaml); overrides --sizes")
+    parser.add_argument("--horizon", type=int, default=MAX_SAMPLES,
+                        help="horizon for the rect series (1_000_000 "
+                             "for the 10x14 floor-0.20 market)")
     parser.add_argument("--which", choices=["p2etg", "preflid", "both"],
                         default="both")
     parser.add_argument("--preflid-constant", type=float, default=CONSTANT,
@@ -250,6 +277,40 @@ def main() -> int:
 
     out_root = Path(args.out)
     out_root.mkdir(parents=True, exist_ok=True)
+
+    if args.rect:
+        # rectangular series: one label per config path
+        jobs = []
+        for cfg_path in args.rect:
+            config = _market_config(0, config_path=cfg_path)
+            ctx = build_upstream_context(config)
+            n_w, n_m = len(ctx["women"]), len(ctx["men"])
+            floor = config["feedback"].get("probability_floor", FLOOR)
+            tag = "floor20" if floor >= 0.2 else "floor15"
+            jobs.append((ctx,
+                         f"{tag}_{{algo}}_N{n_w}_K{n_m}_real",
+                         args.horizon))
+        for ctx, label_tpl, horizon in jobs:
+            for algo in ("p2etg", "preflid"):
+                if args.which not in (algo, "both"):
+                    continue
+                name = label_tpl.format(algo=algo.upper().replace("P2ETG", "P2ETG"))
+                for seed in range(10):
+                    if algo == "p2etg":
+                        s = _run_p2etg(ctx, seed, out_root,
+                                       market_name=name, horizon=horizon)
+                        print(f"[{name} s{seed}] stopped={s['stopped']} "
+                              f"T_stop={s['T_stop']} "
+                              f"correct={s['correct_at_stop']}")
+                    else:
+                        s = _run_preflid(ctx, seed, out_root,
+                                         preflid_constant=args.preflid_constant,
+                                         market_name=name, horizon=horizon)
+                        print(f"[{name} s{seed}] "
+                              f"stopped={s['preflid_stopped']} "
+                              f"T_stop={s['preflid_T_stop']} "
+                              f"correct={s['preflid_correct']}")
+        return 0
 
     for n in args.sizes:
         ctx = build_upstream_context(_market_config(n))
