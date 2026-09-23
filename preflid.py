@@ -74,6 +74,7 @@ class PrefLID:
         min_sample_ratio: float = 0.5,
         provider: Optional[SignalProvider] = None,
         center_policy: str = "random",
+        warmup_rounds: int = 0,
     ):
         self.men = list(men)
         self.women = list(women)
@@ -92,6 +93,7 @@ class PrefLID:
                 f"got {center_policy!r}"
             )
         self.center_policy = center_policy
+        self.warmup_rounds = int(warmup_rounds)
         self._rr_queue: List = []
 
         self.agent_states: Dict[Hashable, AgentState] = {}
@@ -205,6 +207,27 @@ class PrefLID:
     # ------------------------------------------------------------------
     # RRT
     # ------------------------------------------------------------------
+
+    def _warmup_round(self) -> int:
+        """Uniform pass over ALL agents' pairwise arms (one sample each).
+
+        A warm-start for the RRT phase: every agent's counts advance in
+        lockstep (like uniform round-robin sampling), so the MLE
+        matching stabilises early instead of waiting for each agent's
+        turn as a centre. warmup_rounds=0 (default) preserves the
+        upstream behaviour exactly.
+        """
+        n = 0
+        for agent, state in self.agent_states.items():
+            opponents = self.women if isinstance(agent, Man) else self.men
+            for i in range(len(opponents)):
+                for j in range(i + 1, len(opponents)):
+                    b_i, b_j = opponents[i], opponents[j]
+                    x = self._sample_comparison(agent, b_i, b_j)
+                    self.observe(agent, b_i, b_j, x)
+                    self.t += 1
+                    n += 1
+        return n
 
     def rrt_round(self, center: Hashable) -> int:
         if isinstance(center, Man):

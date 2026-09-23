@@ -169,7 +169,8 @@ def _run_p2etg(ctx, seed: int, out_root: Path,
 def _run_preflid(ctx, seed: int, out_root: Path,
                  preflid_constant: float = CONSTANT,
                  market_name: Optional[str] = None,
-                 horizon: int = MAX_SAMPLES) -> Dict:
+                 horizon: int = MAX_SAMPLES,
+                 warmup_rounds: int = 0) -> Dict:
     from preflid import PrefLID
 
     n_m, n_w = len(ctx["men"]), len(ctx["women"])
@@ -188,7 +189,7 @@ def _run_preflid(ctx, seed: int, out_root: Path,
         men=ctx["men"], women=ctx["women"], provider=provider,
         rng=random.Random(seed), constant=preflid_constant, budget=budget,
         center_policy="round_robin", min_samples_per_pair=10,
-        min_sample_ratio=0.5,
+        min_sample_ratio=0.5, warmup_rounds=warmup_rounds,
     )
     records: List = []
     original_rrt = learner.rrt_round
@@ -200,6 +201,10 @@ def _run_preflid(ctx, seed: int, out_root: Path,
         return n_samples
 
     learner.rrt_round = rrt_round_with_record
+    for _ in range(warmup_rounds):
+        learner._warmup_round()
+        learner._refresh_estimates()
+        records.append((learner.t, learner._current_gs_matching()))
     max_iter = horizon // max(n_m * (n_m - 1) // 2, n_w * (n_w - 1) // 2)
     pl = learner.run_until_stop(max_iterations=max_iter, verbose=False)
     pl_stopped = bool(pl["stopped"])
@@ -221,7 +226,7 @@ def _run_preflid(ctx, seed: int, out_root: Path,
         "alpha": None, "seed": seed, "budget": budget,
         "constant": preflid_constant,
         "center_policy": "round_robin", "max_iterations": max_iter,
-        "horizon": horizon,
+        "horizon": horizon, "warmup_rounds": warmup_rounds,
         "market_source": f"LLMRouterBench real market {n_w}x{n_m} "
                          f"(full data, no split)",
         "preferences": "symmetric (mirror) — unique stable matching",
@@ -268,6 +273,9 @@ def main() -> int:
                         help="CI constant for the PrefLID series "
                              "(0.1 default; 0.3 needed for all-correct "
                              "certification at 5x5)")
+    parser.add_argument("--preflid-warmup", type=int, default=0,
+                        help="uniform warm-start rounds before the RRT "
+                             "phase (one pass over all arms each)")
     parser.add_argument("--out",
                         default="../gale_shapley_llm_routing/"
                                 "gale_shapley_data_share")
@@ -324,7 +332,8 @@ def main() -> int:
         if args.which in ("preflid", "both"):
             for seed in range(10):
                 s = _run_preflid(ctx, seed, out_root,
-                                 preflid_constant=args.preflid_constant)
+                                 preflid_constant=args.preflid_constant,
+                                 warmup_rounds=args.preflid_warmup)
                 print(f"[{n}x{n} floor15 PrefLID s{seed}] "
                       f"stopped={s['preflid_stopped']} "
                       f"T_stop={s['preflid_T_stop']} "
