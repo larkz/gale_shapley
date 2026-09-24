@@ -212,6 +212,9 @@ def run_ver11(ctx, seed, out_root) -> Dict:
     pd.DataFrame(rows, columns=["t", "matching_str", "disjoint", "correct",
                                 "regret"]).to_csv(run_dir / "rounds.csv",
                                                   index=False)
+    (run_dir / "bt_params.json").write_text(
+        json.dumps(simplex_thetas(ctx["theta_task"], ctx["theta_model"]),
+                   indent=2))
     (run_dir / "config.json").write_text(json.dumps({
         "run_id": "ver11_PrefLID", "N": n, "K": n, "alpha": None,
         "seed": seed, **VER11,

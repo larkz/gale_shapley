@@ -221,6 +221,9 @@ def _run_preflid(ctx, seed: int, out_root: Path,
     pd.DataFrame(rows, columns=["t", "matching_str", "disjoint", "correct",
                                 "regret"]).to_csv(run_dir / "rounds.csv",
                                                   index=False)
+    (run_dir / "bt_params.json").write_text(
+        json.dumps(simplex_thetas(ctx["theta_task"], ctx["theta_model"]),
+                   indent=2))
     (run_dir / "config.json").write_text(json.dumps({
         "run_id": label.rsplit("_seed", 1)[0], "N": n_w, "K": n_m,
         "alpha": None, "seed": seed, "budget": budget,
