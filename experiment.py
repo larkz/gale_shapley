@@ -444,15 +444,15 @@ def plot_regret_by_N(df_sum: pd.DataFrame):
 def main():
     print("Generating data...")
     df_all = generate_data(
-        Ns=[8],
-        Ks=[8],
+        Ns=[6],
+        Ks=[6],
         alphas=[2.0],
         seeds=list(range(10)),
         max_epochs=200,
         adaptive=True,
-        check_every=500,
-        max_samples=60_000,
-        constant=0.1,
+        check_every=105,
+        max_samples=200_000,
+        constant=0.01,
         run_id="ver5_P2ETG",
         # baseline="etc_uniform",     # default
         # T0=3000,
