@@ -43,7 +43,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from gs_lib.gs_tools import StabilityVerifier
+from gs_lib.gs_tools import Man, StabilityVerifier
 
 from llm_matching.providers import RouterBenchBTProvider
 from llm_matching.upstream_rep import _pairs, build_upstream_context
@@ -202,9 +202,21 @@ def _run_preflid(ctx, seed: int, out_root: Path,
 
     learner.rrt_round = rrt_round_with_record
     for _ in range(warmup_rounds):
-        learner._warmup_round()
-        learner._refresh_estimates()
-        records.append((learner.t, learner._current_gs_matching()))
+        # per-agent warm-up pass with honest per-agent recording: a
+        # transient wrong matching is charged at the agent-step
+        # granularity (10-45 samples), not the full-round granularity
+        # (325 at 5x10), matching the RRT recording granularity
+        for agent in list(learner.agent_states.keys()):
+            opponents = (learner.women if isinstance(agent, Man)
+                         else learner.men)
+            opp = list(opponents)
+            for i in range(len(opp)):
+                for j in range(i + 1, len(opp)):
+                    x = learner._sample_comparison(agent, opp[i], opp[j])
+                    learner.observe(agent, opp[i], opp[j], x)
+                    learner.t += 1
+            learner._refresh_estimates()
+            records.append((learner.t, learner._current_gs_matching()))
     max_iter = horizon // max(n_m * (n_m - 1) // 2, n_w * (n_w - 1) // 2)
     pl = learner.run_until_stop(max_iterations=max_iter, verbose=False)
     pl_stopped = bool(pl["stopped"])
@@ -279,6 +291,9 @@ def main() -> int:
     parser.add_argument("--preflid-warmup", type=int, default=0,
                         help="uniform warm-start rounds before the RRT "
                              "phase (one pass over all arms each)")
+    parser.add_argument("--n-seeds", type=int, default=10,
+                        help="seeds 0..N-1 per series (10 default; "
+                             "30 recommended for stable medians)")
     parser.add_argument("--out",
                         default="../gale_shapley_llm_routing/"
                                 "gale_shapley_data_share")
@@ -306,7 +321,7 @@ def main() -> int:
                 if args.which not in (algo, "both"):
                     continue
                 name = label_tpl.format(algo=algo.upper().replace("P2ETG", "P2ETG"))
-                for seed in range(10):
+                for seed in range(args.n_seeds):
                     if algo == "p2etg":
                         s = _run_p2etg(ctx, seed, out_root,
                                        market_name=name, horizon=horizon)
@@ -316,24 +331,26 @@ def main() -> int:
                     else:
                         s = _run_preflid(ctx, seed, out_root,
                                          preflid_constant=args.preflid_constant,
-                                         market_name=name, horizon=horizon)
+                                         market_name=name, horizon=horizon,
+                                         warmup_rounds=args.preflid_warmup)
                         print(f"[{name} s{seed}] "
                               f"stopped={s['preflid_stopped']} "
                               f"T_stop={s['preflid_T_stop']} "
-                              f"correct={s['preflid_correct']}")
+                              f"correct={s['preflid_correct']} "
+                              f"regret={s['final_regret']}")
         return 0
 
     for n in args.sizes:
         ctx = build_upstream_context(_market_config(n))
         if args.which in ("p2etg", "both"):
-            for seed in range(10):
+            for seed in range(args.n_seeds):
                 s = _run_p2etg(ctx, seed, out_root)
                 print(f"[{n}x{n} floor15 P2ETG s{seed}] "
                       f"stopped={s['stopped']} T_stop={s['T_stop']} "
                       f"correct={s['correct_at_stop']} "
                       f"regret={s['final_regret']}")
         if args.which in ("preflid", "both"):
-            for seed in range(10):
+            for seed in range(args.n_seeds):
                 s = _run_preflid(ctx, seed, out_root,
                                  preflid_constant=args.preflid_constant,
                                  warmup_rounds=args.preflid_warmup)
