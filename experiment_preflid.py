@@ -401,14 +401,14 @@ def generate_data(
 def main():
     print("Generating data...")
     df_sum = generate_data(
-        Ns=[6],
-        Ks=[6],
-        seeds=list(range(10)),
-        budgets=[20000],
-        constant=0.1,
-        max_iterations=200000,
+        Ns=[8],
+        Ks=[8],
+        seeds=list(range(30)),
+        budgets=[20_000],
+        constant=0.005,
+        max_iterations=20_000,
         horizon=200_000,
-        run_id="ver5_PrefLID",
+        run_id="ver12_PrefLID",
     )
 
     print(f"\nDone. Data in {RUNS_DIR.resolve()}/")
