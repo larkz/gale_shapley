@@ -256,7 +256,9 @@ def _run_preflid(ctx, seed: int, out_root: Path,
     if records:
         grid_records, last, idx = [], records[0], 0
         k = grid
-        while k <= t_end:
+        # grid only up to the RRT horizon: beyond T_stop the frozen
+        # COMMITTED matching plays (not the last MLE snapshot)
+        while k <= pl_t_stop:
             while idx < len(records) and records[idx][0] <= k:
                 last = records[idx]
                 idx += 1
