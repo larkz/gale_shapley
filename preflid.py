@@ -72,9 +72,6 @@ class PrefLID:
         max_lattice_vertices: int = 5000,
         min_samples_per_pair: int = 10,
         min_sample_ratio: float = 0.5,
-        provider: Optional[SignalProvider] = None,
-        center_policy: str = "random",
-        warmup_rounds: int = 0,
     ):
         self.men = list(men)
         self.women = list(women)
@@ -87,14 +84,6 @@ class PrefLID:
         self.max_lattice_vertices = max_lattice_vertices
         self.min_samples_per_pair = min_samples_per_pair
         self.min_sample_ratio = min_sample_ratio
-        if center_policy not in ("random", "round_robin"):
-            raise ValueError(
-                f"center_policy must be 'random' or 'round_robin', "
-                f"got {center_policy!r}"
-            )
-        self.center_policy = center_policy
-        self.warmup_rounds = int(warmup_rounds)
-        self._rr_queue: List = []
 
         self.agent_states: Dict[Hashable, AgentState] = {}
         for m in self.men:
@@ -141,19 +130,6 @@ class PrefLID:
         return t1 / (t1 + t2)
 
     def _sample_comparison(self, agent: Hashable, b1: Hashable, b2: Hashable) -> int:
-        """One comparison. Returns 1 if canonical-first won.
-
-        If a SignalProvider is attached, the observation is delegated to
-        it (x=1 means the canonical-first of (b1, b2) won). Otherwise the
-        original true-theta Bernoulli draw is used.
-        """
-        if self.provider is not None:
-            x = self.provider.observe(agent, b1, b2)
-            if x not in (0, 1):
-                raise ValueError(
-                    f"SignalProvider returned {x!r} for ({agent}, {b1}, {b2})"
-                )
-            return int(x)
         key = _canonical(b1, b2)
         p = self._true_prob_cache[(agent, key)]
         return 1 if self.rng.random() < p else 0
