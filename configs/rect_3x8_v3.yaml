@@ -1,0 +1,46 @@
+routerbench_root: ../LLMRouterBench
+datasets:
+- mbpp
+- medqa
+- finqa
+models:
+- Qwen2.5-Coder-7B-Instruct
+- DeepSeek-R1-0528-Qwen3-8B
+- Qwen3-8B
+- Fin-R1
+- NVIDIA-Nemotron-Nano-9B-v2
+- GLM-Z1-9B-0414
+- MiniCPM4.1-8B
+- Intern-S1-mini
+min_aligned_records: 100
+split:
+  train: 0.6
+  val: 0.2
+  test: 0.2
+  seed: 3407
+feedback:
+  mode: bt
+  target_median_win_probability: 0.7
+  probability_floor: 0.1
+ties:
+  policy: deterministic_jitter
+  epsilon: 1.0e-06
+preferences:
+  mode: symmetric
+p2etg:
+  adaptive: true
+  check_every: 31
+  max_samples: 200000
+  constant: 0.1
+preflid:
+  budget: 20000
+  constant: 0.1
+  max_lattice_vertices: 5000
+  min_samples_per_pair: 10
+  min_sample_ratio: 0.5
+  center_policy: round_robin
+  max_iterations: 17857
+experiment:
+  seeds: 10
+  random_baseline_seeds: 200
+output_dir: outputs/rect_3x8_v3

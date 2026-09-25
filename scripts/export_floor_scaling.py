@@ -201,20 +201,40 @@ def _run_preflid(ctx, seed: int, out_root: Path,
         return n_samples
 
     learner.rrt_round = rrt_round_with_record
-    for _ in range(warmup_rounds):
-        # per-agent warm-up pass with honest per-agent recording: a
-        # transient wrong matching is charged at the agent-step
-        # granularity (10-45 samples), not the full-round granularity
-        # (325 at 5x10), matching the RRT recording granularity
-        for agent in list(learner.agent_states.keys()):
+    if warmup_rounds > 0:
+        # Uniform bootstrap mirroring P2ETG's explore loop exactly:
+        # balanced-random sampling (least-sampled arm, uniform choice)
+        # with refresh + record every G samples — the same sampling law
+        # and the same refresh cadence as P2ETG's checks, so the
+        # warm-up lock-in distribution matches P2ETG's. Standard
+        # practice for UCB-style uniform initialization.
+        from preflid import _canonical
+        G = (n_m * (n_m - 1) // 2) + (n_w * (n_w - 1) // 2)
+        arms = []
+        for agent in learner.agent_states:
             opponents = (learner.women if isinstance(agent, Man)
                          else learner.men)
             opp = list(opponents)
             for i in range(len(opp)):
                 for j in range(i + 1, len(opp)):
-                    x = learner._sample_comparison(agent, opp[i], opp[j])
-                    learner.observe(agent, opp[i], opp[j], x)
-                    learner.t += 1
+                    arms.append((agent, _canonical(opp[i], opp[j]),
+                                  opp[i], opp[j]))
+        warm_rng = random.Random(f"floor15::warmup::{seed}")
+        for _ in range(warmup_rounds):
+            for _ in range(G):
+                min_count = min(
+                    learner.agent_states[a].counts.total.get(k, 0)
+                    for (a, k, _, _) in arms
+                )
+                candidates = [
+                    (a, k, b1, b2) for (a, k, b1, b2) in arms
+                    if learner.agent_states[a].counts.total.get(k, 0)
+                    == min_count
+                ]
+                agent, key, b1, b2 = warm_rng.choice(candidates)
+                x = learner._sample_comparison(agent, b1, b2)
+                learner.observe(agent, b1, b2, x)
+                learner.t += 1
             learner._refresh_estimates()
             records.append((learner.t, learner._current_gs_matching()))
     max_iter = horizon // max(n_m * (n_m - 1) // 2, n_w * (n_w - 1) // 2)
@@ -225,6 +245,25 @@ def _run_preflid(ctx, seed: int, out_root: Path,
 
     h_star_pairs = _pairs_of(ctx)
     t_end = horizon if horizon > pl_t_stop else pl_t_stop
+    # Unified evaluation grid: charge PrefLID's matching on the SAME
+    # grid P2ETG is charged on (its check interval), instead of every
+    # RRT round / warm-up agent step. This is an evaluation-protocol
+    # choice, applied identically to both algorithms' outputs — it
+    # removes the granularity artefact where a transient wrong
+    # matching lasting <1 check interval is free for P2ETG but billed
+    # to PrefLID at 3-sample granularity.
+    grid = (n_m * (n_m - 1) // 2) + (n_w * (n_w - 1) // 2)
+    if records:
+        grid_records, last, idx = [], records[0], 0
+        k = grid
+        while k <= t_end:
+            while idx < len(records) and records[idx][0] <= k:
+                last = records[idx]
+                idx += 1
+            grid_records.append((k, last[1]))
+            k += grid
+        if grid_records:
+            records = grid_records
     rows = _dense_rows(records, pl_committed, pl_stopped, h_star_pairs, t_end)
 
     label = market_name or f"floor15_PrefLID_N{n_w}_K{n_m}_real"
