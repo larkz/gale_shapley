@@ -238,7 +238,10 @@ class P2ETG:
 
         if adaptive:
             while self.t < max_samples:
-                self._sample_batch(check_every)
+                # Never overshoot the budget: the final batch may be
+                # smaller than check_every.
+                batch = min(check_every, max_samples - self.t)
+                self._sample_batch(batch)
                 self._refresh_estimates()
                 matching = self.current_matching()
                 disjoint = self._pairwise_disjoint()
@@ -247,14 +250,14 @@ class P2ETG:
                     rounds.append((self.t, matching, disjoint))
 
                 diag = _emit_line(
-                    self.epoch, check_every, check_every,
+                    self.epoch, batch, batch,
                     self.t, disjoint, matching,
                 ) if verbose else {}
 
                 trace.append({
                     "epoch": self.epoch,
                     "R": check_every,
-                    "new_samples": check_every,
+                    "new_samples": batch,
                     "t": self.t,
                     "matching": matching,
                     "pairwise_disjoint": disjoint,

@@ -1,0 +1,59 @@
+# LLM-task stable matching experiment — 4x4 smoke test
+#
+# Small-scale configuration used for CI and end-to-end validation.
+# Run from the gale_shapley repository root:
+#   python -m llm_matching.cli --config configs/llm_matching_smoke.yaml \
+#       --algorithm p2etg --feedback bt
+
+routerbench_root: ../LLMRouterBench
+
+datasets:
+  - math500
+  - livecodebench
+  - finqa
+  - medqa
+
+models:
+  - DeepSeek-R1-0528-Qwen3-8B
+  - Fin-R1
+  - Llama-3.1-8B-UltraMedical
+  - Qwen2.5-Coder-7B-Instruct
+
+min_aligned_records: 100
+
+split:
+  train: 0.60
+  val: 0.20
+  test: 0.20
+  seed: 3407
+
+feedback:
+  mode: bt
+  target_median_win_probability: 0.70
+  replay_gamma: 0.25
+  replay_probability_epsilon: 0.01
+  model_replay_mode: probabilistic
+
+ties:
+  policy: deterministic_jitter
+  epsilon: 1.0e-6
+
+# 4x4 market: pairwise arms = 4*C(4,2) + 4*C(4,2) = 24.
+p2etg:
+  adaptive: true
+  check_every: 24
+  max_samples: 10000
+  constant: 0.1
+
+preflid:
+  budget: 100
+  max_iterations: 200
+  constant: 0.1
+  max_lattice_vertices: 5000
+  min_samples_per_pair: 10
+
+experiment:
+  seeds: 2
+  random_baseline_seeds: 200
+
+output_dir: outputs/llm_matching_smoke

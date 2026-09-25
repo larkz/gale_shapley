@@ -32,6 +32,7 @@ from gs_lib.islands import (
     PartitionStructure, build_partitions_from_cis, enumerate_configurations,
     lattice_from_configuration, construct_islands, Island,
 )
+from p2etg import SignalProvider
 
 
 # ============================================================================
@@ -76,6 +77,7 @@ class PrefLID:
         self.women = list(women)
         self.true_theta_men = true_theta_men
         self.true_theta_women = true_theta_women
+        self.provider = provider
         self.rng = rng or random.Random(0)
         self.constant = constant
         self.budget = budget
@@ -157,9 +159,51 @@ class PrefLID:
                 self.constant,
             )
 
+    def _pick_center(self, remaining: List) -> Hashable:
+        """Choose the next RRT center.
+
+        random (upstream default): iid uniform -> per-agent arm counts
+        follow a multinomial fluctuation (the straggler agent can lag
+        the mean by ~30% early on, delaying the matching lock).
+
+        round_robin: every pass shuffles the eligible agents and cycles
+        through them once, so each agent is centered EXACTLY once per
+        pass -> per-agent arm counts grow in lockstep (like P2ETG's
+        uniform round-robin), eliminating the straggler.
+        """
+        if self.center_policy == "random":
+            return self.rng.choice(remaining)
+        remaining_set = set(remaining)
+        self._rr_queue = [a for a in self._rr_queue if a in remaining_set]
+        if not self._rr_queue:
+            self._rr_queue = list(remaining)
+            self.rng.shuffle(self._rr_queue)
+        return self._rr_queue.pop(0)
+
     # ------------------------------------------------------------------
     # RRT
     # ------------------------------------------------------------------
+
+    def _warmup_round(self) -> int:
+        """Uniform pass over ALL agents' pairwise arms (one sample each).
+
+        A warm-start for the RRT phase: every agent's counts advance in
+        lockstep (like uniform round-robin sampling), so the MLE
+        matching stabilises early instead of waiting for each agent's
+        turn as a centre. warmup_rounds=0 (default) preserves the
+        upstream behaviour exactly.
+        """
+        n = 0
+        for agent, state in self.agent_states.items():
+            opponents = self.women if isinstance(agent, Man) else self.men
+            for i in range(len(opponents)):
+                for j in range(i + 1, len(opponents)):
+                    b_i, b_j = opponents[i], opponents[j]
+                    x = self._sample_comparison(agent, b_i, b_j)
+                    self.observe(agent, b_i, b_j, x)
+                    self.t += 1
+                    n += 1
+        return n
 
     def rrt_round(self, center: Hashable) -> int:
         if isinstance(center, Man):
@@ -318,7 +362,7 @@ class PrefLID:
             remaining = [a for a in all_agents if a not in U]
             if not remaining:
                 remaining = all_agents
-            center = self.rng.choice(remaining)
+            center = self._pick_center(remaining)
 
             n_samples = self.rrt_round(center)
 
