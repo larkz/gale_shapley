@@ -872,6 +872,45 @@ def print_summary_table(avg_df, fields=None, float_fmt="{:.3f}"):
 
 
 # ===========================================================================
+# Figure-3 style plot of one sweep (called by experiment*.py)
+# ===========================================================================
+
+def plot_sweep_figure3_style(runs_dir, run_id="", algo_label="",
+                             max_iterations=50_000, save_stem=None,
+                             title="Mean Cumulative Regret"):
+    """Plot the runs of one sweep exactly as in Figure 3 of the paper.
+
+    Each run's cumulative regret is extended to `max_iterations` with its
+    final value, the line is the mean over seeds and the band is
+    mean +/- 0.1 standard deviation (plot_mean_regret_with_std). Saves
+    <save_stem>.pdf and <save_stem>.png.
+    """
+    import re
+    prefix = f"{run_id}_" if run_id else ""
+    all_data, labels = {}, {}
+    for cfg, seeds_folders in find_config_folders(runs_dir).items():
+        if not cfg.startswith(prefix):
+            continue
+        all_data[cfg] = {seed: load_regret_data(folder, max_iterations)
+                         for seed, folder in seeds_folders}
+        m = re.search(r"N(\d+)_K(\d+)", cfg)
+        labels[cfg] = (f"N={m.group(1)}, K={m.group(2)} {algo_label}".strip()
+                       if m else cfg)
+    if not all_data:
+        return None
+    fig, ax = plot_mean_regret_with_std(
+        all_data, max_iterations=max_iterations, save_path=None,
+        show_individual=False, std_multiplier=0.1, labels=labels,
+        title=title, figsize=(7, 6))
+    ax.title.set_fontweight("normal")
+    if save_stem:
+        fig.savefig(f"{save_stem}.pdf", format="pdf")
+        fig.savefig(f"{save_stem}.png", dpi=150)
+    plt.close(fig)
+    return fig
+
+
+# ===========================================================================
 # Main Execution Pipeline
 # ===========================================================================
 

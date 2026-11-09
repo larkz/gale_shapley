@@ -2,6 +2,40 @@
 
 A two-sided online learning algorithm for stable matching, where agents learn their own preferences through pairwise comparison signals supplied by any external source.
 
+# Revised supplementary material
+
+This revision fixes two problems in the first upload. See `CHANGES.md`.
+
+1. `p2etg.py` and `preflid.py` were assembled from two branches of our
+   repository and did not match each other, so `experiment_preflid.py`
+   failed on import. Both files are now taken from one consistent version.
+   `providers.py`, referenced below, was missing and is now included.
+2. `experiment.py` drew a diagnostic regret plot, not the plot of
+   Figure 3. Both `experiment.py` and `experiment_preflid.py` now draw the
+   regret curve with the routine and settings used for Figure 3
+   (`plotting.plot_sweep_figure3_style`).
+
+## Figure 3
+
+Figure 3 is drawn by `make_figure3.py` from run directories, with the
+plotting routine `plotting.plot_mean_regret_with_std`:
+
+- each run's cumulative regret is extended to the plotted range with its
+  final value (a stopped learner keeps playing its committed matching), so
+  the mean at every round is taken over all seeds;
+- line = mean over seeds; shaded band = mean +/- 0.1 standard deviation;
+- x-axis: iterations t = 0 ... 50,000.
+
+```bash
+python make_figure3.py          # writes results/figures/*.pdf and *.png
+```
+
+The runs of the LLM-routing panel (Figure 3c) are included under
+`results/llm_routing/` (10 seeds per series; `config.json` in each run
+directory records its settings). The synthetic panels (Figure 3a, 3b)
+read run directories written by `experiment.py` and
+`experiment_preflid.py` from `results/synthetic/`.
+
 # Quick Start
 
 ```bash
@@ -12,7 +46,10 @@ python experiment.py
 Produces:
 
   - `runs/` — per-run `rounds.csv`, `summary.json`, `config.json`, and aggregate `all_rounds.csv`, `all_summaries.csv`
-  - `plots/` — `regret_curve.png`, `tstop_distribution.png`, `ci_convergence.png`, `regret_by_N.png`
+  - `plots/` — `mean_cum_regret.pdf/.png` (drawn as in Figure 3), `tstop_distribution.png`, `ci_convergence.png`, `regret_by_N.png`
+
+`python experiment_preflid.py` runs the corresponding PrefLID sweep
+(`runs_preflid/`, `plots_preflid/mean_cum_regret.pdf/.png`).
 
 # Directory Layout
 
@@ -23,8 +60,13 @@ project/
 |    -- bt.py             # Bradley-Terry MLE, CIs, ranking
 |-- p2etg.py              # P2ETG learner + SignalProvider ABC
 |-- providers.py          # BradleyTerryProvider (built-in)
+|-- preflid.py            # PrefLID learner
 |-- simulate.py           # Single-run demo
-|-- experiment.py         # Multi-seed sweep + plotting
+|-- experiment.py         # Multi-seed sweep + plotting (P2ETG)
+|-- experiment_preflid.py # Multi-seed sweep + plotting (PrefLID)
+|-- plotting.py           # Plotting routines used for Figure 3
+|-- make_figure3.py       # Draws the panels of Figure 3 from run directories
+|-- results/              # LLM-routing runs of Figure 3c
  -- runs/                 # Generated output
 ```
 

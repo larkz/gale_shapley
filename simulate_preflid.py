@@ -100,7 +100,7 @@ def main(N: int = 4, K: int = 4, seed: int = 0,
     print("\nPrefLID iteration log:")
     for r in rounds:
         print(f"  iter={r['iteration']:>3} t={r['t']:>6} "
-              f"|Omega|={r['omega_size']:>8} "
+              f"|Omega|={str(r['omega_size']):>8} "
               f"islands={r['n_islands']} "
               f"status={r['status']}")
 

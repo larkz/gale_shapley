@@ -411,6 +411,12 @@ def main():
         run_id="ver5_PrefLID",
     )
 
+    # Regret curve drawn with the routine and settings of Figure 3.
+    from plotting import plot_sweep_figure3_style
+    plot_sweep_figure3_style(RUNS_DIR, run_id="ver5_PrefLID",
+                             algo_label="PrefLID",
+                             save_stem=str(PLOTS_DIR / "mean_cum_regret"))
+
     print(f"\nDone. Data in {RUNS_DIR.resolve()}/")
     print(f"Total runs: {len(df_sum)}")
     print(f"In M*_true (correct): {df_sum['preflid_in_mstar_true'].sum()}")

@@ -462,7 +462,13 @@ def main():
     df_sum = pd.read_csv(RUNS_DIR / "all_summaries.csv")
 
     print("Producing plots...")
-    plot_regret_with_uncertainty(df_all)
+    # Regret curve drawn with the routine and settings of Figure 3 in the
+    # paper (runs extended to the horizon, mean +/- 0.1 std, t <= 50,000).
+    # plot_regret_with_uncertainty(df_all) is a raw diagnostic: it averages
+    # only the runs still recorded at each t, so it differs from Figure 3.
+    from plotting import plot_sweep_figure3_style
+    plot_sweep_figure3_style(RUNS_DIR, run_id="ver5_P2ETG", algo_label="P2ETG",
+                             save_stem=str(PLOTS_DIR / "mean_cum_regret"))
     plot_tstop_distribution(df_sum)
     plot_ci_convergence(df_all)
     plot_regret_by_N(df_sum)
