@@ -1,0 +1,16 @@
+{
+  "run_id": "floor15_PrefLID_N8_K8_real",
+  "N": 8,
+  "K": 8,
+  "alpha": null,
+  "seed": 3,
+  "budget": 20000,
+  "constant": 0.1,
+  "center_policy": "round_robin",
+  "max_iterations": 7142,
+  "horizon": 200000,
+  "warmup_rounds": 8,
+  "market_source": "LLMRouterBench real market 8x8 (full data, no split)",
+  "preferences": "symmetric (mirror) \u2014 unique stable matching",
+  "feedback": "BT, eta-calibrated (target 0.9), probability_floor 0.15"
+}

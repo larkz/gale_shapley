@@ -1,4 +1,4 @@
-# Upstream replication: larkz/gale_shapley origin/main experiments
+# Upstream replication: base-repository main-branch experiments
 # (experiment.py + experiment_preflid.py) with the market & reward from
 # the REAL diverse-korbench 8x8 LLMRouterBench market.
 #

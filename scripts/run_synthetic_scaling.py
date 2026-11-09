@@ -3,7 +3,7 @@
 gale_shapley_data_share format, with PrefLID's regret at parity or
 better than P2ETG.
 
-Markets: the upstream larkin/preflid_tuning generation — independent
+Markets: the upstream synthetic-experiment branch generation — independent
 Dirichlet(alpha) thetas per side, H* = men-proposing Gale-Shapley on
 the true preferences (multiple stable matchings may exist; regret is
 identification regret against this H*, the upstream ver4/ver6

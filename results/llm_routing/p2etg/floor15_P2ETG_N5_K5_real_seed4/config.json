@@ -1,0 +1,16 @@
+{
+  "run_id": "floor15_P2ETG",
+  "baseline": "p2etg",
+  "T0": 100,
+  "N": 5,
+  "K": 5,
+  "alpha": null,
+  "seed": 4,
+  "adaptive": true,
+  "check_every": 100,
+  "max_samples": 200000,
+  "constant": 0.1,
+  "market_source": "LLMRouterBench greedy distinct-winner scaling market 5x5 (full data, no split)",
+  "preferences": "symmetric (mirror) \u2014 unique stable matching",
+  "feedback": "BT, eta-calibrated (target 0.9), probability_floor 0.15"
+}

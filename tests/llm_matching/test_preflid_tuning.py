@@ -1,4 +1,4 @@
-"""Tests for the ported PrefLID tuning (upstream larkin/preflid_tuning).
+"""Tests for the ported PrefLID tuning (upstream synthetic-experiment branch).
 
 Covers:
   * the new per-agent sampling-balance gate _all_pairs_sufficiently_sampled

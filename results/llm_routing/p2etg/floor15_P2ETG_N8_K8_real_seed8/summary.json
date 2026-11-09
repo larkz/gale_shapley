@@ -1,0 +1,23 @@
+{
+  "N": 8,
+  "K": 8,
+  "alpha": null,
+  "seed": 8,
+  "run_id": "floor15_P2ETG",
+  "baseline": "p2etg",
+  "T0": 100,
+  "stopped": true,
+  "T_stop": 104384,
+  "n_epochs": 233,
+  "correct_at_stop": 1,
+  "oracle_str": "Matching(pairs=[(DeepSeek-R1-0528-Qwen3-8B-medqa), (Fin-R1-humaneval), (GLM-Z1-9B-0414-math500), (Intern-S1-mini-korbench), (Qwen2.5-Coder-7B-Instruct-mbpp), (Qwen3-8B-finqa), (gemma-2-9b-it-emorynlp), (glm-4-9b-chat-meld)], unmatched_men=[], unmatched_women=[])",
+  "committed_str": "Matching(pairs=[(DeepSeek-R1-0528-Qwen3-8B-medqa), (Fin-R1-humaneval), (GLM-Z1-9B-0414-math500), (Intern-S1-mini-korbench), (Qwen2.5-Coder-7B-Instruct-mbpp), (Qwen3-8B-finqa), (gemma-2-9b-it-emorynlp), (glm-4-9b-chat-meld)], unmatched_men=[], unmatched_women=[])",
+  "final_regret": 24640,
+  "stable_under_truth": 1,
+  "stable_under_hat": 1,
+  "reason_truth": null,
+  "reason_hat": null,
+  "constant": 0.1,
+  "min_bt_gap": 1.6938933383814765e-07,
+  "n_stable_matchings": 1
+}
