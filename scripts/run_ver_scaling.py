@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """run_ver_scaling.py — ver6/ver11 parameters on REAL LLM markets (3/5/10).
 
-Faithful port of the larkin/preflid_tuning experiment settings to the
+Faithful port of the synthetic-experiment branch experiment settings to the
 real LLMRouterBench scaling markets:
 
   ver6_P2ETG:  Ns=[3,5,10], alphas=2.0 -> REAL market, seeds 0..4,

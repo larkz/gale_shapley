@@ -1,0 +1,17 @@
+{
+  "N": 5,
+  "K": 5,
+  "alpha": null,
+  "seed": 8,
+  "budget": 20000,
+  "constant": 0.3,
+  "horizon": 200000,
+  "preflid_stopped": true,
+  "preflid_T_stop": 8150,
+  "preflid_iterations": 815,
+  "preflid_islands_final": 1,
+  "preflid_correct": 1,
+  "preflid_stable_truth": 1,
+  "final_regret": 460,
+  "market_source": "LLMRouterBench real 5x5 scaling market (mirror, floor 0.15, target 0.9)"
+}

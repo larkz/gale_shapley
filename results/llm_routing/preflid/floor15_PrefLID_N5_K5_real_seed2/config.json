@@ -1,0 +1,15 @@
+{
+  "run_id": "floor15_PrefLID",
+  "N": 5,
+  "K": 5,
+  "alpha": null,
+  "seed": 2,
+  "budget": 20000,
+  "constant": 0.3,
+  "center_policy": "round_robin",
+  "max_iterations": 20000,
+  "horizon": 200000,
+  "market_source": "LLMRouterBench greedy distinct-winner scaling market 5x5 (full data, no split)",
+  "preferences": "symmetric (mirror) \u2014 unique stable matching",
+  "feedback": "BT, eta-calibrated (target 0.9), probability_floor 0.15"
+}

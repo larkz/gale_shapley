@@ -5,7 +5,7 @@ data: can a one-to-one assignment between LLM models and task types be
 learned — and *certified* — from noisy pairwise capability  
 comparisons, without ever running an LLM?
 
-Built on the [larkz/gale\_shapley](https://github.com/larkz/gale_shapley)  
+Built on the anonymised base repository  
 matching-bandit codebase (P2ETG / PrefLID learners, GS/BT/island  
 libraries), replacing the synthetic Dirichlet market with markets  
 constructed from **LLMRouterBench** (20 models x 15 datasets,  
@@ -85,8 +85,8 @@ docs/ENVIRONMENT.md §9).
 
 ## Provenance
 
-Forked from `larkz/gale_shapley` @ `cb7cfe9` (origin/main), branch  
-`zilong/LLM_routing`; the llm_matching package and all experiments  
+Forked from the base repository, branch  
+`llm-routing`; the llm_matching package and all experiments  
 were developed on `llm-routing-experiment` (commit history preserved  
 there). Upstream learner semantics are preserved — PrefLID keeps the  
 upstream `random` center policy as its default; `round_robin` and the  
